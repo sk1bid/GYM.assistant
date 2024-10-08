@@ -7,7 +7,7 @@ class MenuCallBack(CallbackData, prefix="menu"):
     level: int
     menu_name: str
     page: int = 1
-    day_id: int | None = None
+    training_day_id: int | None = None
     exercise_id: int | None = None
     set_id: int | None = None
     program_id: int | None = None
@@ -23,22 +23,38 @@ def get_user_main_btns(*, level: int, sizes: tuple[int] = (1,)):
     for text, menu_name in btns.items():
         if menu_name == 'schedule' or menu_name == 'program' or menu_name == 'profile':
             keyboard.add(InlineKeyboardButton(text=text,
-                                              callback_data=MenuCallBack(level=level + 1, menu_name=menu_name).pack()))
+                                              callback_data=MenuCallBack(level=1, menu_name=menu_name).pack()))
 
     return keyboard.adjust(*sizes).as_markup()
 
 
-def get_user_programs_list(*, level: int, programs: list, sizes: tuple[int] = (1,)):
+def get_user_programs_list(*, level: int, programs: list, sizes: tuple[int] = (2, 1)):
     keyboard = InlineKeyboardBuilder()
 
     for c in programs:
         keyboard.add(InlineKeyboardButton(text=c.name,
                                           callback_data=MenuCallBack(level=level + 1, menu_name=c.name,
-                                                                     category=c.id).pack()))
+                                                                     program_id=c.id).pack()))
     keyboard.add(InlineKeyboardButton(text='Назад',
                                       callback_data=MenuCallBack(level=level - 1, menu_name='main').pack()))
     keyboard.add(InlineKeyboardButton(text='Добавить программу',
-                                      callback_data=MenuCallBack(level=level + 1, menu_name='adding_program').pack()))
+                                      callback_data="adding_program"))
+    return keyboard.adjust(*sizes).as_markup()
+
+
+def get_profile_btns(*, level: int, sizes: tuple[int] = (1,)):
+    keyboard = InlineKeyboardBuilder()
+
+    keyboard.add(InlineKeyboardButton(text='Назад',
+                                      callback_data=MenuCallBack(level=level - 1, menu_name='main').pack()))
+    return keyboard.adjust(*sizes).as_markup()
+
+
+def get_schedule_btns(*, level: int, sizes: tuple[int] = (1,)):
+    keyboard = InlineKeyboardBuilder()
+
+    keyboard.add(InlineKeyboardButton(text='Назад',
+                                      callback_data=MenuCallBack(level=level - 1, menu_name='main').pack()))
     return keyboard.adjust(*sizes).as_markup()
 
 
@@ -56,8 +72,9 @@ def get_training_day_btns(
     keyboard.add(InlineKeyboardButton(text="Назад",
                                       callback_data=MenuCallBack(level=level - 1, menu_name='program').pack()))
     keyboard.add(InlineKeyboardButton(text="Редактировать день",
-                                      callback_data=MenuCallBack(level=level + 2, menu_name='training_day',
-                                                                 day_id=training_day_id).pack()))
+                                      callback_data=MenuCallBack(level=level + 1, menu_name='training_day_edit',
+                                                                 training_day_id=training_day_id,
+                                                                 program_id=user_program, page=page).pack()))
 
     keyboard.adjust(*sizes)
 
@@ -68,6 +85,7 @@ def get_training_day_btns(
                                             callback_data=MenuCallBack(
                                                 level=level,
                                                 menu_name=menu_name,
+                                                training_day_id=training_day_id,
                                                 program_id=user_program,
                                                 page=page + 1).pack()))
 
@@ -76,10 +94,33 @@ def get_training_day_btns(
                                             callback_data=MenuCallBack(
                                                 level=level,
                                                 menu_name=menu_name,
+                                                training_day_id=training_day_id,
                                                 program_id=user_program,
                                                 page=page - 1).pack()))
 
     return keyboard.row(*row).as_markup()
+
+
+def get_change_tr_day_btns(
+        *,
+        level: int,
+        program_id: int,
+        exercises: list,
+        page: int,
+        training_day_id: int,
+        sizes: tuple[int] = (3, 1),
+):
+    keyboard = InlineKeyboardBuilder()
+
+    for i in exercises:
+        keyboard.add(InlineKeyboardButton(text=i.name,
+                                          callback_data=MenuCallBack(level=level, exercise_id=i.id,
+                                                                     menu_name=i.name).pack()))
+    keyboard.add(InlineKeyboardButton(text="Назад",
+                                      callback_data=MenuCallBack(level=level - 1, menu_name='training_day',
+                                                                 training_day_id=training_day_id,
+                                                                 program_id=program_id, page=page).pack()))
+    return keyboard.adjust(*sizes).as_markup()
 
 
 def get_callback_btns(

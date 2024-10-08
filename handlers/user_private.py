@@ -1,10 +1,13 @@
+from asyncio import sleep
+
 from aiogram import F, Router, types
 from aiogram.filters import Command, StateFilter, or_f, CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
+from aiogram.utils.formatting import Text
 
 from sqlalchemy.ext.asyncio import AsyncSession
-from GYM_assistant.database.orm_query import (
+from database.orm_query import (
     orm_add_user,
     orm_update_user,
     orm_change_banner_image,
@@ -24,9 +27,9 @@ from GYM_assistant.database.orm_query import (
 
 )
 
-from GYM_assistant.filters.chat_types import ChatTypeFilter
-from GYM_assistant.handlers.menu_processing import get_menu_content
-from GYM_assistant.kbds.inline import MenuCallBack, get_callback_btns
+from filters.chat_types import ChatTypeFilter
+from handlers.menu_processing import get_menu_content
+from kbds.inline import MenuCallBack, get_callback_btns
 
 user_private_router = Router()
 user_private_router.message.filter(ChatTypeFilter(["private"]))
@@ -45,6 +48,7 @@ class AddUser(StatesGroup):
     }
 
 
+#############################################FSM для регистрации########################################################
 @user_private_router.message(StateFilter(None), CommandStart())
 async def send_welcome(message: types.Message, state: FSMContext, session: AsyncSession):
     user_id = message.from_user.id
@@ -73,7 +77,6 @@ async def cancel_handler(message: types.Message, state: FSMContext) -> None:
         AddUser.user_for_change = None
     await state.clear()
     await message.answer("Действия отменены")
-
 
 
 @user_private_router.message(StateFilter("*"), Command("назад"))
@@ -140,16 +143,105 @@ async def add_weight(message: types.Message, state: FSMContext, session: AsyncSe
     await message.answer_photo(media.media, caption=media.caption, reply_markup=reply_markup)
 
 
+#############################################FSM для добавления тренировочной программы#################################
+class AddTrainingProgram(StatesGroup):
+    name = State()
+    user_id = State()
+
+    training_program_for_change = None
+
+    texts = {
+        "AddTrainingProgram:name": "Введите имя заново:",
+        "AddTrainingProgram:description": "Введите описание заново",
+    }
+
+
+@user_private_router.callback_query(StateFilter(None), F.data == "adding_program")
+async def ask_name(callback: types.CallbackQuery, state: FSMContext):
+    await callback.message.answer("Введите название программы тренировок:")
+    await callback.answer()
+    await state.set_state(AddTrainingProgram.name)
+
+
+@user_private_router.message(StateFilter("*"), Command("cancel"))
+@user_private_router.message(StateFilter("*"), F.text.casefold() == "отмена")
+async def cancel_handler(message: types.Message, state: FSMContext) -> None:
+    current_state = await state.get_state()
+    if current_state is None:
+        return
+    if AddUser.user_for_change:
+        AddUser.user_for_change = None
+    await state.clear()
+    await message.answer("Действия отменены")
+
+
+@user_private_router.message(StateFilter("*"), Command("back"))
+@user_private_router.message(StateFilter("*"), F.text.casefold() == "назад")
+async def back_step_handler(message: types.Message, state: FSMContext) -> None:
+    current_state = await state.get_state()
+    print(current_state)
+    if current_state == AddUser.name:
+        await message.answer(
+            'Предыдущего шага нет, или введите ваше имя или напишите "отмена"'
+        )
+        return
+
+    previous = None
+    for step in AddUser.__all_states__:
+        if step.state == current_state:
+            await state.set_state(previous)
+            await message.answer(
+                f"Ок, вы вернулись к прошлому шагу\n{AddUser.texts[previous]}"
+            )
+            return
+        previous = step
+
+
+@user_private_router.message(AddTrainingProgram.name, F.text)
+async def add_name(message: types.Message, state: FSMContext, session: AsyncSession):
+    user_id = message.from_user.id
+    print(user_id)
+    if message.text == "." and AddTrainingProgram.training_program_for_change:
+        await state.update_data(name=AddTrainingProgram.training_program_for_change.name)
+    else:
+        await state.update_data(user_id=user_id, name=message.text)
+
+        data = await state.get_data()
+        print(data)
+        await orm_add_program(session, data)
+    await message.answer(f"Готово!")
+    await sleep(0.5)
+    media, reply_markup = await get_menu_content(session, level=1, menu_name="program", user_id=user_id)
+
+    await message.answer_photo(media.media, caption=media.caption, reply_markup=reply_markup)
+    await state.clear()
+
+
+###################################FSM для добавления упражнений в тренировочный день###################################
+class AddExerciseToTD(StatesGroup):
+    sets_amount = State
+    reps_amount = State
+
+    exercise_td_for_change = None
+
+    texts = {
+        "AddExerciseToTD:sets_amount": "Введите кол-во подходов заново",
+        "AddExerciseToTD:reps_amount": "Введите кол-во повторений заново"
+
+    }
+
+
 @user_private_router.callback_query(MenuCallBack.filter())
 async def user_menu(callback: types.CallbackQuery, callback_data: MenuCallBack, session: AsyncSession):
     media, reply_markup = await get_menu_content(
         session,
         level=callback_data.level,
         menu_name=callback_data.menu_name,
-        program_id=callback_data.program_id,
+        training_program_id=callback_data.program_id,
+        exercise_id=callback_data.exercise_id,
         page=callback_data.page,
+        training_day_id=callback_data.training_day_id,
         user_id=callback.from_user.id,
     )
-
     await callback.message.edit_media(media=media, reply_markup=reply_markup)
     await callback.answer()

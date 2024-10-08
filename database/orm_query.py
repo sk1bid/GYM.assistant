@@ -1,7 +1,7 @@
 from sqlalchemy import select, update, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from GYM_assistant.database.models import User, Banner, Training_Program, Training_Day, Exercise, Set
+from database.models import User, Banner, TrainingProgram, TrainingDay, Exercise, Set, AdminExercises
 
 
 ############### Работа с баннерами (информационными страницами) ###############
@@ -38,9 +38,9 @@ async def orm_get_info_pages(session: AsyncSession):
 ############################ Программы ######################################
 
 async def orm_add_program(session: AsyncSession, data: dict):
-    obj = Training_Program(
+    obj = TrainingProgram(
         name=data['name'],
-        description=data['description'],
+        user_id=data['user_id'],
     )
     session.add(obj)
     await session.commit()
@@ -48,11 +48,11 @@ async def orm_add_program(session: AsyncSession, data: dict):
 
 async def orm_update_program(session: AsyncSession, program_id: int, data: dict):
     query = (
-        update(Training_Program)
-        .where(Training_Program.id == program_id)
+        update(TrainingProgram)
+        .where(TrainingProgram.id == program_id)
         .values(
             name=data["name"],
-            description=data["description"],
+
         )
     )
     await session.execute(query)
@@ -60,20 +60,20 @@ async def orm_update_program(session: AsyncSession, program_id: int, data: dict)
 
 
 async def orm_get_programs(session: AsyncSession, user_id: int):
-    query = select(Training_Program).filter(Training_Program.user_id == user_id)
+    query = select(TrainingProgram).filter(TrainingProgram.user_id == user_id)
     result = await session.execute(query)
     return result.scalars().all()
 
 
 async def orm_get_program(session: AsyncSession, program_id: int):
-    query = select(Training_Program).where(Training_Program.id == program_id)
+    query = select(TrainingProgram).where(TrainingProgram.id == program_id)
     result = await session.execute(query)
     return result.scalar()
 
 
 async def orm_delete_program(session: AsyncSession, program_id: int):
     query = (
-        delete(Training_Program).where(Training_Program.id == program_id)
+        delete(TrainingProgram).where(TrainingProgram.id == program_id)
     )
     await session.execute(query)
     await session.commit()
@@ -81,30 +81,30 @@ async def orm_delete_program(session: AsyncSession, program_id: int):
 
 ############################ Тренировочные дни ######################################
 
-async def orm_add_training_day(session: AsyncSession, data: dict, program_id: int):
-    obj = Training_Day(
+async def orm_add_training_day(session: AsyncSession, day_of_week: str, program_id: int):
+    obj = TrainingDay(
         training_program_id=program_id,
-        day_of_week=str(data['day_of_week']),
+        day_of_week=day_of_week,
     )
     session.add(obj)
     await session.commit()
 
 
 async def orm_get_training_day(session: AsyncSession, training_day_id: int):
-    query = select(Training_Day).where(Training_Day.id == training_day_id)
+    query = select(TrainingDay).where(TrainingDay.id == training_day_id)
     result = await session.execute(query)
     return result.scalar()
 
 
 async def orm_get_training_days(session: AsyncSession, training_program_id: int):
-    query = select(Training_Day).filter(Training_Day.training_program_id == training_program_id)
+    query = select(TrainingDay).filter(TrainingDay.training_program_id == training_program_id)
     result = await session.execute(query)
     return result.scalars().all()
 
 
 async def orm_delete_training_day(session, training_day_id: int):
     query = (
-        delete(Training_Day).where(Training_Day.id == training_day_id)
+        delete(TrainingDay).where(TrainingDay.id == training_day_id)
     )
     await session.execute(query)
     await session.commit()
@@ -150,6 +150,14 @@ async def orm_update_exercise(session: AsyncSession, exercise_id: int, data: dic
     await session.commit()
 
 
+async def orm_delete_exercise(session, exercise_id: int):
+    query = (
+        delete(Exercise).where(Exercise.id == exercise_id)
+    )
+    await session.execute(query)
+    await session.commit()
+
+
 ############################ Подходы ######################################
 
 async def orm_add_set(session: AsyncSession, data: dict):
@@ -181,6 +189,42 @@ async def orm_update_set(session: AsyncSession, set_id: int, data: dict):
         .values(
             name=data['name'],
             description=data['description'],
+        )
+    )
+    await session.execute(query)
+    await session.commit()
+
+
+############################ Шаблонные упражнения ######################################
+async def orm_add_admin_exercise(session: AsyncSession, data: dict):
+    session.add(
+        AdminExercises(
+            name=data['name'],
+            description=data['description'],
+            image=data['image']
+        )
+    )
+    await session.commit()
+
+async def orm_get_admin_exercise(session: AsyncSession, admin_exercise_id: int):
+    query = select(AdminExercises).where(AdminExercises.id == admin_exercise_id)
+    result = await session.execute(query)
+    return result.scalar()
+
+
+async def orm_get_admin_exercises(session: AsyncSession):
+    query = select(AdminExercises)
+    result = await session.execute(query)
+    return result.scalars().all()
+
+
+async def orm_update_admin_exercise(session: AsyncSession, admin_exercise_id: int, data: dict):
+    query = (
+        update(AdminExercises)
+        .where(AdminExercises.id == admin_exercise_id)
+        .values(
+            name=data['name'],
+            description=data['description'],
             image=data['image'],
         )
     )
@@ -188,9 +232,13 @@ async def orm_update_set(session: AsyncSession, set_id: int, data: dict):
     await session.commit()
 
 
+async def orm_delete_admin_exercise(session: AsyncSession, admin_exercise_id: int):
+    query = delete(AdminExercises).where(AdminExercises.id == admin_exercise_id)
+    await session.execute(query)
+    await session.commit()
+
+
 ##################### Добавляем юзера в БД #####################################
-
-
 async def orm_add_user(
         session: AsyncSession,
         data: dict

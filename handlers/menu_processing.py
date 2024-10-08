@@ -1,7 +1,10 @@
+from email.mime import image
+
 from sqlalchemy.ext.asyncio import AsyncSession
 from aiogram.types import InputMediaPhoto
+from aiogram import F, types
 
-from GYM_assistant.database.orm_query import (
+from database.orm_query import (
     orm_get_program,
     orm_get_programs,
     orm_get_training_day,
@@ -12,15 +15,16 @@ from GYM_assistant.database.orm_query import (
     orm_get_set,
     orm_delete_program,
     orm_update_set,
-    orm_get_banner
+    orm_get_banner,
+    orm_get_user_by_id, orm_add_training_day, orm_get_admin_exercises
 )
-from GYM_assistant.kbds.inline import (
+from kbds.inline import (
     get_user_main_btns,
     get_user_programs_list,
-    get_training_day_btns,
+    get_training_day_btns, get_profile_btns, get_schedule_btns, get_change_tr_day_btns,
 )
 
-from GYM_assistant.utils.paginator import Paginator
+from utils.paginator import Paginator
 
 
 async def main_menu(session, level, menu_name):
@@ -28,7 +32,7 @@ async def main_menu(session, level, menu_name):
 
     if banner is None:
         # If no banner is found, provide a default image or message
-        image = InputMediaPhoto(media='https://postimg.cc/Ty7d15kq', caption='Привет, тестировщик :)')
+        image = InputMediaPhoto(media='https://postimg.cc/Ty7d15kq', caption='Привет, тестировщик :) Это главное меню')
     else:
         image = InputMediaPhoto(media=banner.image, caption=banner.description)
 
@@ -37,10 +41,42 @@ async def main_menu(session, level, menu_name):
     return image, kbds
 
 
+async def profile(session, level, menu_name, user_id):
+    banner = await orm_get_banner(session, menu_name)
+    user = await orm_get_user_by_id(session, user_id)
+
+    if banner is None:
+        # If no banner is found, provide a default image or message
+        image = InputMediaPhoto(media='https://postimg.cc/Ty7d15kq',
+                                caption=f'Привет, тестировщик :) Это твой профиль\n{user.name} - {user.weight} кг')
+    else:
+        image = InputMediaPhoto(media=banner.image, caption=banner.description)
+
+    kbds = get_profile_btns(level=level)
+
+    return image, kbds
+
+
+async def schedule(session, level, menu_name):
+    banner = await orm_get_banner(session, menu_name)
+
+    if banner is None:
+        # If no banner is found, provide a default image or message
+        image = InputMediaPhoto(media='https://postimg.cc/Ty7d15kq',
+                                caption=f'Привет, тестировщик :) Это твое расписание')
+    else:
+        image = InputMediaPhoto(media=banner.image, caption=banner.description)
+
+    kbds = get_schedule_btns(level=level)
+
+    return image, kbds
+
+
 async def programs_catalog(session, level, menu_name, user_id):
     banner = await orm_get_banner(session, menu_name)
     if banner is None:
-        image = InputMediaPhoto(media='https://postimg.cc/Ty7d15kq', caption='Привет, тестировщик :)')
+        image = InputMediaPhoto(media='https://postimg.cc/Ty7d15kq',
+                                caption='Привет, тестировщик :) Это твой каталог программ')
     else:
         image = InputMediaPhoto(media=banner.image, caption=banner.description)
 
@@ -61,24 +97,31 @@ def pages(paginator: Paginator):
     return btns
 
 
-async def training_days(session, level, training_program, page):
-    training_days_list = await orm_get_training_days(session, training_program)
-
+async def training_days(session, level, training_program_id, page):
+    program = await orm_get_program(session, training_program_id)
+    training_days_list = await orm_get_training_days(session, training_program_id)
+    if not training_days_list:
+        print("111111111111111111")
+        for day in ["Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота", "Воскресенье"]:
+            await orm_add_training_day(session, day_of_week=day, program_id=training_program_id)
+            training_days_list = await orm_get_training_days(session, training_program_id)
     paginator = Paginator(training_days_list, page=page)
     training_day = paginator.get_page()[0]
 
+    exercises_str = "Упражнений не обнаружено"
+
     image = InputMediaPhoto(
-        media=training_day.image,
-        caption=f"<strong>{training_day.day_of_week}\
-                </strong>\n{training_day.description}\n\
-                <strong>День {paginator.page} из {paginator.pages}</strong>",
+        media='https://postimg.cc/Ty7d15kq',
+        caption=f"<strong>Программа: {program.name}\n\n"
+                f"День {paginator.page} из {paginator.pages} ({training_day.day_of_week})\n\n"
+                f"{exercises_str}</strong>",
     )
 
     pagination_btns = pages(paginator)
 
     kbds = get_training_day_btns(
         level=level,
-        user_program=training_program,
+        user_program=training_program_id,
         page=page,
         pagination_btns=pagination_btns,
         training_day_id=training_day.id,
@@ -87,18 +130,39 @@ async def training_days(session, level, training_program, page):
     return image, kbds
 
 
+async def exercises(session, level, training_program_id: int, training_day_id: int, page: int):
+    user_exercises = await orm_get_exercises(session, training_day_id)
+    admin_exercises = await orm_get_admin_exercises(session)
+    print(admin_exercises[0].description)
+    user_image = InputMediaPhoto(media='https://postimg.cc/Ty7d15kq',
+                                 caption='')
+    kbds = get_change_tr_day_btns(level=level, program_id=training_program_id, training_day_id=training_day_id,
+                                  page=page,
+                                  exercises=admin_exercises)
+    return user_image, kbds
+
+
 async def get_menu_content(
         session: AsyncSession,
         level: int,
         menu_name: str,
-        program_id: int | None = None,
+        training_program_id: int | None = None,
+        exercise_id: int | None = None,
         page: int | None = None,
         training_day_id: int | None = None,
         user_id: int | None = None,
 ):
+    print(level, menu_name, training_program_id, page, training_day_id, user_id)
     if level == 0:
         return await main_menu(session, level, menu_name)
     elif level == 1:
-        return await programs_catalog(session, level, menu_name, user_id)
+        if menu_name == "program":
+            return await programs_catalog(session, level, menu_name, user_id)
+        elif menu_name == "profile":
+            return await profile(session, level, menu_name, user_id)
+        elif menu_name == "schedule":
+            return await schedule(session, level, menu_name)
     elif level == 2:
-        return await training_days(session, level, program_id, page)
+        return await training_days(session, level, training_program_id, page)
+    elif level == 3:
+        return await exercises(session, level, training_program_id, training_day_id, page)

@@ -7,6 +7,15 @@ class Base(DeclarativeBase):
     updated: Mapped[DateTime] = mapped_column(DateTime, default=func.now(), onupdate=func.now())
 
 
+class AdminExercises(Base):
+    __tablename__ = 'admin_exercises'
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(), unique=True)
+    image: Mapped[str] = mapped_column(String())
+    description: Mapped[str] = mapped_column(Text)
+
+
 class Banner(Base):
     __tablename__ = 'banner'
 
@@ -25,43 +34,39 @@ class User(Base):
     weight: Mapped[float] = mapped_column(Float(), nullable=False)
 
 
-class Training_Program(Base):
+class TrainingProgram(Base):
     __tablename__ = 'training_program'
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    name: Mapped[str] = mapped_column(String(20), nullable=False)
-    description: Mapped[str] = mapped_column(String(100), nullable=False)
-    user_id: Mapped[int] = mapped_column(ForeignKey('user.id'), nullable=False)
+    name: Mapped[str] = mapped_column(String(50), unique=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey('user.user_id'), nullable=False)
 
     # Relationships
-    training_days: Mapped['Training_Day'] = relationship(back_populates='training_program')  # Use back_populates here
+    user: Mapped['User'] = relationship(backref='training_program')
 
 
-class Training_Day(Base):
+class TrainingDay(Base):
     __tablename__ = 'training_day'
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    day_of_week: Mapped[str] = mapped_column(String(10), nullable=False)  # Например, 'Monday', 'Tuesday'
+    day_of_week: Mapped[str] = mapped_column(String(20), nullable=False)  # Например, 'Monday', 'Tuesday'
     training_program_id: Mapped[int] = mapped_column(ForeignKey('training_program.id'), nullable=False)
-    image: Mapped[str] = mapped_column(String(150))
 
     # Relationships
-    training_program: Mapped['Training_Program'] = relationship(back_populates='training_days')  # Matching back_populates
-    exercises: Mapped['Exercise'] = relationship(back_populates='training_day')
+    training_program: Mapped['TrainingProgram'] = relationship(backref='training_day')
 
 
 class Exercise(Base):
     __tablename__ = 'exercise'
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    name: Mapped[str] = mapped_column(String(150), nullable=False)
+    name: Mapped[str] = mapped_column(String(150), unique=True)
     description: Mapped[str] = mapped_column(Text)
     image: Mapped[str] = mapped_column(String(150))
     training_day_id: Mapped[int] = mapped_column(ForeignKey("training_day.id"), nullable=False)
 
     # Relationships
-    training_day: Mapped['Training_Day'] = relationship(back_populates='exercises')
-    sets: Mapped['Set'] = relationship(back_populates='exercise')
+    training_day: Mapped['TrainingDay'] = relationship(backref='exercise')
 
 
 class Set(Base):
@@ -73,4 +78,4 @@ class Set(Base):
     repetitions: Mapped[int] = mapped_column(Integer, nullable=False)
 
     # Relationships
-    exercise: Mapped['Exercise'] = relationship(back_populates='sets')
+    exercise: Mapped['Exercise'] = relationship(backref='set')

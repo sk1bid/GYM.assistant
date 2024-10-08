@@ -1,7 +1,7 @@
 import os
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from GYM_assistant.database.models import Base
+from database.models import Base
 
 # from .env file:
 # DB_LITE=sqlite+aiosqlite:///my_base.db
