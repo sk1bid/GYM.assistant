@@ -10,14 +10,12 @@ from sqlalchemy.orm import (
     DeclarativeBase, Mapped, mapped_column, relationship
 )
 
-
 class Base(DeclarativeBase):
     """
     Базовый класс с полями created/updated для всех таблиц.
     """
     created: Mapped[DateTime] = mapped_column(DateTime, default=func.now())
     updated: Mapped[DateTime] = mapped_column(DateTime, default=func.now(), onupdate=func.now())
-
 
 class ExerciseCategory(Base):
     """

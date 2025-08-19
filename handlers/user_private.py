@@ -730,13 +730,13 @@ async def user_menu(callback: types.CallbackQuery, callback_data: MenuCallBack, 
                 )
                 await orm_update_exercise(session, callback_data.exercise_id, {"sets": new_sets})
 
-                if operation == "➕":
-                    await orm_add_exercise_set(session, callback_data.exercise_id, user_exercise.base_reps)
-                elif operation == "➖":
-                    exercise_sets = await orm_get_exercise_sets(session, callback_data.exercise_id)
-                    if len(exercise_sets) > 1:
-                        last_set_id = exercise_sets[-1].id
-                        await orm_delete_exercise_set(session, last_set_id)
+                # if operation == "➕":
+                #     await orm_add_exercise_set(session, callback_data.exercise_id, user_exercise.base_reps)
+                # elif operation == "➖":
+                #     exercise_sets = await orm_get_exercise_sets(session, callback_data.exercise_id)
+                #     if len(exercise_sets) > 1:
+                #         last_set_id = exercise_sets[-1].id
+                #         await orm_delete_exercise_set(session, last_set_id)
 
             media, reply_markup = await get_menu_content(
                 session,

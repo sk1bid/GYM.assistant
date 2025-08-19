@@ -9,3 +9,6 @@ __pygit cache__/
 *.pyc
 
 /alembic/
+/migrations/
+
+/.vscode/

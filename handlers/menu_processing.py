@@ -882,7 +882,7 @@ async def exercise_settings(session: AsyncSession, level: int, exercise_id: int,
     try:
         user_exercise = await orm_get_exercise(session, exercise_id)
         banner = await orm_get_banner(session, "user_program")
-        base_ex_sets = await orm_get_exercise_sets(session, exercise_id)
+        base_ex_sets = user_exercise.base_sets
         user_image = InputMediaPhoto(
             media=banner.image,
             caption="<strong>Добавьте нужное вам количество подходов и повторений</strong>",
