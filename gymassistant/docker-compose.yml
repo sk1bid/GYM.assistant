@@ -13,17 +13,6 @@ services:
       timeout: 5s
       retries: 5
 
-  press-api:
-    build:
-      context: .
-      dockerfile: press_api/Dockerfile
-    environment:
-      - MODEL_PATH=/app/press_lstm.pt
-      - SCALER_X_PATH=/app/scaler_x.pkl
-      - SCALER_Y_PATH=/app/scaler_y.pkl
-    ports:
-      - "8000:8000"
-
   bot:
     build:
       context: .
@@ -31,13 +20,10 @@ services:
     depends_on:
       db:
         condition: service_healthy
-      press-api:
-        condition: service_started
     environment:
       - TOKEN=${TOKEN}
       - ADMIN_IDS=${ADMIN_IDS}
       - DB_URL=postgresql+asyncpg://${POSTGRES_USER:-dev_user}:${POSTGRES_PASSWORD:-22856719d8Sk1bid}@db:5432/${POSTGRES_DB:-devdb}
-      - NEIRO_API_URL=http://press-api:8000/predict
       - WEBHOOK_HOST=${WEBHOOK_HOST}
       - WEBHOOK_PATH=${WEBHOOK_PATH}
       - WEBHOOK_SECRET=${WEBHOOK_SECRET}
