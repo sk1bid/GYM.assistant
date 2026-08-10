@@ -100,10 +100,55 @@ async function pickDay() {
 
 function startPath(data) {
   // Незавершённая тренировка продолжается с того же места, а не начинается заново.
-  return data.active_session ? '/workout' : `/workout/${data.today.id}`;
+  return data.active ? '/workout' : `/workout/${data.today.id}`;
+}
+
+/**
+ * Идущая тренировка — весь экран целиком.
+ *
+ * Пока она не закрыта, главная говорит про неё, а не про календарь. Раньше про
+ * тренировку знала только ветка «сегодня есть упражнения», а тренируют не
+ * обязательно сегодняшний день: пропущенный отрабатывают кнопкой, любой другой
+ * выбирают шторкой. Отсюда две беды сразу. В день отдыха экран уходил в ветку
+ * «упражнений не запланировано» и о тренировке не говорил ни слова — вернуться
+ * в неё с главной было нельзя вовсе (в навигации экрана тренировки нет), только
+ * закрыть и открыть приложение заново. А в обычный день заголовок, счётчик и
+ * список упражнений оставались СЕГОДНЯШНИМИ, хотя отрабатывалась суббота.
+ *
+ * Поэтому здесь всё — про тренируемый день: его имя в заголовке, его упражнения
+ * в списке, выделено то, что делать сейчас. Сегодняшнее число не теряется: оно
+ * уходит в подпись, когда день не совпадает.
+ */
+function activeBlock(data) {
+  const active = data.active;
+  const day = active.day;
+  const exercises = day?.exercises || [];
+  const elsewhere = day && day.day_of_week !== data.today_name;
+
+  return `
+    <div class="overline flush">тренировка идёт</div>
+    <h1>${escape(day ? day.day_of_week : 'Тренировка')}</h1>
+    <p class="subtitle">
+      ${active.total ? `${active.done} из ${active.total} подходов` : ''}
+      ${elsewhere ? ` · сегодня ${escape(data.today_name.toLowerCase())}` : ''}
+    </p>
+
+    ${exercises.length ? sessionCard(exercises, active.next_exercise_id) : ''}
+
+    <button class="btn mt-4" id="start">
+      ${ICON.play}
+      Продолжить тренировку
+    </button>
+
+    ${weeklyCard(data.week)}
+  `;
 }
 
 function todayBlock(data) {
+  // Идущая тренировка старше всех остальных состояний экрана: и «нет программы»,
+  // и «день отдыха» рассказывали бы не про то, чем человек занят прямо сейчас.
+  if (data.active) return activeBlock(data);
+
   if (!data.has_program) {
     return `
       <h1>Программы ещё нет</h1>
@@ -134,7 +179,6 @@ function todayBlock(data) {
 
   const exercises = today.exercises;
   const sets = exercises.reduce((sum, e) => sum + e.sets, 0);
-  const active = data.active_session;
 
   return `
     <div class="overline flush">сегодня</div>
@@ -144,21 +188,18 @@ function todayBlock(data) {
       ${plural(sets, 'подход', 'подхода', 'подходов')}
     </p>
 
-    ${active ? resumeCard() : ''}
-    ${sessionCard(exercises, active)}
+    ${sessionCard(exercises, exercises[0]?.id)}
 
     <button class="btn mt-4" id="start">
       ${ICON.play}
-      ${active ? 'Продолжить тренировку' : 'Начать тренировку'}
+      Начать тренировку
     </button>
 
-    ${active ? '' : `
-      ${missedRow(data.missed)}
-      <button class="btn outlined mt-3" id="other-day">
-        ${ICON.calendar}
-        Тренировать другой день
-      </button>
-    `}
+    ${missedRow(data.missed)}
+    <button class="btn outlined mt-3" id="other-day">
+      ${ICON.calendar}
+      Тренировать другой день
+    </button>
 
     ${weeklyCard(data.week)}
   `;
@@ -223,22 +264,22 @@ function weeklyCard(week) {
 }
 
 /**
- * Упражнения дня одним блоком.
+ * Упражнения дня одним блоком; выделенная строка — то, что делать сейчас.
  *
  * Раньше ближайшее упражнение жило в отдельной акцентной карточке, оторванной от
  * списка остальных, — и выглядело объектом другого сорта, а не первым из четырёх.
- * Теперь это первая, выделенная строка той же карточки: видно, что это все
- * упражнения сегодня, просто первое — ближайшее. В идущей тренировке «следующего»
- * нет (его называет resumeCard), поэтому там просто список.
+ * Теперь это выделенная строка той же карточки: видно, что это все упражнения дня,
+ * просто одно из них — ближайшее.
+ *
+ * `currentId` приходит снаружи, а не считается здесь: до старта это просто первое
+ * упражнение, а в идущей тренировке — текущий шаг с сервера, и он вполне может
+ * оказаться третьим по списку. Выделять в этом случае первое значило бы врать.
+ * null — выделять нечего (план отработан целиком, осталось «Завершить»).
  */
-function sessionCard(exercises, active) {
-  const [first, ...rest] = exercises;
-  const rows = (active ? exercises.map(exRow) : rest.map(exRow)).join('');
-
+function sessionCard(exercises, currentId) {
   return `
     <div class="session">
-      ${active ? '' : nextRow(first)}
-      ${rows}
+      ${exercises.map((e) => (e.id === currentId ? nextRow(e) : exRow(e))).join('')}
     </div>
   `;
 }
@@ -295,11 +336,3 @@ function missedRow(missed) {
   `;
 }
 
-function resumeCard() {
-  return `
-    <div class="card accent">
-      <div class="overline flush">тренировка идёт</div>
-      <div class="hint mt-1">Продолжится с того подхода, на котором остановились.</div>
-    </div>
-  `;
-}

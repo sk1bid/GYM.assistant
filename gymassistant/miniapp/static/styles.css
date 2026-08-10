@@ -1002,6 +1002,14 @@ body.with-nav #rest-bar {
 /* Сегодняшняя клетка обведена — иначе в пустой день её не найти. */
 .heat-grid span.today { box-shadow: 0 0 0 1.5px var(--on-surface); }
 
+/*
+  Дни текущей недели, которые ещё не наступили. Держат форму последней колонки и
+  только: без них она обрывалась на сегодняшнем дне, и в понедельник карта
+  заканчивалась одиноким квадратом в верхней строке. Фон прозрачный — заливка
+  `--heat-0` означает «отдыхал», а про завтра этого ещё никто не знает.
+*/
+.heat-grid span.future { background: transparent; }
+
 .heat-months {
   display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 3px;
   font-size: 9px; color: var(--outline); margin-bottom: var(--sp-1);

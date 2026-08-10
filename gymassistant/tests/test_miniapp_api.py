@@ -14,8 +14,9 @@ import os
 import sys
 import tempfile
 import urllib.parse
-from datetime import timedelta
+from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -736,6 +737,38 @@ async def test_working_off_a_missed_day_on_another_date_closes_it(client: httpx.
 
 
 @pytest.mark.anyio
+async def test_a_training_earlier_than_the_day_does_not_close_it(client: httpx.AsyncClient):
+    """
+    Тренировка, случившаяся РАНЬШЕ самого дня, его не закрывает.
+
+    День недели повторяется каждые семь суток, и одна тренировка закрывает ровно один
+    его повтор — тот, что уже наступил к её моменту. Раньше здесь стояло «была ли
+    вообще сессия по этому дню за последнюю неделю», и отработанное с опозданием
+    ПРОШЛОЕ воскресенье гасило напоминание про воскресенье наступившее. Наружу лезла
+    суббота: день ещё дальше в прошлом, чем ближайший пропущенный, — ровно то, чего
+    экран обещает не делать.
+    """
+    filled = await _program_with_days(client, "Свой повтор", [1, 2])
+    yesterday, before = filled[1], filled[2]
+
+    # Тренировка по вчерашнему ДНЮ НЕДЕЛИ, но датированная тремя сутками назад:
+    # закрыт ею прошлый повтор этого дня, а не вчерашний.
+    await _backdate(await _train(client, yesterday["id"]), days=3)
+
+    boot = (await client.get("/api/bootstrap", headers=TZ_HEADERS)).json()
+    assert boot["missed"]["id"] == yesterday["id"]
+    assert boot["missed"]["days_ago"] == 1
+
+    # А сегодняшняя — уже ПОСЛЕ дня — закрывает его: это перенос, и дальше по свежести
+    # подтягивается позавчерашний.
+    await _train(client, yesterday["id"])
+
+    boot = (await client.get("/api/bootstrap", headers=TZ_HEADERS)).json()
+    assert boot["missed"]["id"] == before["id"]
+    assert boot["missed"]["days_ago"] == 2
+
+
+@pytest.mark.anyio
 async def test_todays_own_workout_is_never_offered_as_missed(client: httpx.AsyncClient):
     """
     Сегодняшняя тренировка не показывается как пропущенная неделю назад.
@@ -813,6 +846,102 @@ async def test_rest_days_are_never_missed(client: httpx.AsyncClient):
     assert boot["missed"] is None
 
 
+# ---------------------------------------------------------------- идущая тренировка
+
+
+@pytest.mark.anyio
+async def test_active_training_is_reported_even_on_a_rest_day(client: httpx.AsyncClient):
+    """
+    Тренировка, идущая в день отдыха, обязана быть видна на главной.
+
+    Это ровно тот случай, ради которого в bootstrap появился объект `active`:
+    отработать можно пропущенный день, а сегодня при этом упражнений не
+    запланировано. Главная в такой ситуации уходила в ветку «день отдыха» и о
+    тренировке не говорила ни слова — вернуться в неё было нельзя вовсе, только
+    закрыть и открыть приложение заново.
+    """
+    filled = await _program_with_days(client, "Отработка", [1])       # заполнен только вчерашний
+    yesterday = filled[1]
+
+    boot = (await client.get("/api/bootstrap", headers=TZ_HEADERS)).json()
+    assert boot["today"]["exercises"] == []           # сегодня отдыхаем
+    assert boot["active"] is None
+
+    session_id = await _train(client, yesterday["id"])
+
+    boot = (await client.get("/api/bootstrap", headers=TZ_HEADERS)).json()
+    assert boot["today"]["exercises"] == []           # сегодня всё ещё день отдыха
+    assert boot["active"]["session_id"] == session_id
+    # День назван, потому что тренируется НЕ сегодняшний: на экране с сегодняшним
+    # заголовком тренировка без подписи выглядела бы чужой.
+    assert boot["active"]["day"]["id"] == yesterday["id"]
+    assert boot["active"]["day"]["day_of_week"] == _weekday_ru(1)
+
+
+@pytest.mark.anyio
+async def test_active_training_carries_its_own_day_not_todays(client: httpx.AsyncClient):
+    """
+    Пока отрабатывается вчерашний день, главная показывает ЕГО упражнения.
+
+    Сегодняшний день здесь тоже заполнен — и раньше именно он и оставался на экране:
+    заголовок, счётчик подходов и список были сегодняшними, хотя тренировалась
+    суббота. Список упражнений обязан приехать от того дня, который тренируют.
+    """
+    filled = await _program_with_days(client, "Не сегодня", [0, 1])
+    today, yesterday = filled[0], filled[1]
+
+    boot = (await client.get("/api/bootstrap", headers=TZ_HEADERS)).json()
+    todays_ids = {e["id"] for e in boot["today"]["exercises"]}
+    assert todays_ids                                    # сегодня тоже тренировочный день
+
+    await _train(client, yesterday["id"], record=False)
+
+    boot = (await client.get("/api/bootstrap", headers=TZ_HEADERS)).json()
+    active_day = boot["active"]["day"]
+    assert active_day["id"] == yesterday["id"] != today["id"]
+
+    # Упражнения — вчерашнего дня; с сегодняшними они не пересекаются, потому что
+    # Exercise это упражнение В КОНКРЕТНОМ дне, а не строка каталога.
+    active_ids = {e["id"] for e in active_day["exercises"]}
+    assert active_ids and not (active_ids & todays_ids)
+
+    # Выделять на главной надо текущий шаг, а он ещё и не обязан быть первым.
+    assert boot["active"]["next_exercise_id"] in active_ids
+
+
+@pytest.mark.anyio
+async def test_active_training_reports_progress_against_the_plan(client: httpx.AsyncClient):
+    """Счёт подходов в `active` — тот же, что на экране тренировки: план против факта."""
+    filled = await _program_with_days(client, "Прогресс", [0])        # тренируем сегодняшний день
+    today = filled[0]
+
+    started = (await client.post(
+        "/api/training/start", json={"training_day_id": today["id"]},
+    )).json()
+    total = started["progress"]["total"]
+
+    boot = (await client.get("/api/bootstrap", headers=TZ_HEADERS)).json()
+    assert boot["active"]["done"] == 0
+    assert boot["active"]["total"] == total
+
+    await client.post("/api/training/set", json={
+        "session_id": started["session_id"],
+        "exercise_id": started["current"]["exercise"]["id"],
+        "weight": 40.0, "reps": 10,
+    })
+
+    boot = (await client.get("/api/bootstrap", headers=TZ_HEADERS)).json()
+    assert boot["active"]["done"] == 1
+    assert boot["active"]["total"] == total
+    # Шаг уехал вперёд вместе с записанным подходом — ровно как на экране тренировки.
+    state = (await client.get("/api/training/state")).json()
+    assert boot["active"]["next_exercise_id"] == state["current"]["exercise"]["id"]
+
+    # Завершённая тренировка с главной уходит — кнопке «Продолжить» больше нечего продолжать.
+    await client.post("/api/training/finish", json={"session_id": started["session_id"]})
+    assert (await client.get("/api/bootstrap", headers=TZ_HEADERS)).json()["active"] is None
+
+
 @pytest.mark.anyio
 async def test_circuit_step_reports_position_inside_the_round(client: httpx.AsyncClient):
     """
@@ -877,22 +1006,51 @@ async def test_plain_block_reports_position_among_its_exercises(client: httpx.As
 # ---------------------------------------------------------------- недельная сводка
 
 
-async def _backdate(session_id: str, days: int):
-    """Отодвигает тренировку на `days` суток назад — для проверок по неделям."""
+async def _set_session_date(session_id: str, moment):
     import uuid
 
     from sqlalchemy import update
 
     from database.models import TrainingSession
-    from services.clock import utcnow
 
     async with session_maker() as db:
         await db.execute(
             update(TrainingSession)
             .where(TrainingSession.id == uuid.UUID(session_id))
-            .values(date=utcnow() - timedelta(days=days))
+            .values(date=moment)
         )
         await db.commit()
+
+
+async def _backdate(session_id: str, days: int):
+    """Отодвигает тренировку на `days` суток назад — для проверок по неделям."""
+    from services.clock import utcnow
+
+    await _set_session_date(session_id, utcnow() - timedelta(days=days))
+
+
+async def _backdate_to(session_id: str, day: date):
+    """
+    Ставит тренировке конкретную ДАТУ в поясе клиента.
+
+    В базе дата лежит в naive-UTC, а недели раскладываются по календарю пользователя,
+    поэтому целимся в полдень: 12:00 по клиенту не съедет в соседние сутки ни при
+    каком разумном поясе. Нужно там, где важны именно РАЗНЫЕ ДАТЫ внутри одной недели,
+    а сдвигом на целые сутки их не набрать — тот же день недели уедет в другую неделю.
+    """
+    moment = (
+        datetime.combine(day, time(12, 0), tzinfo=ZoneInfo(TZ_NAME))
+        .astimezone(timezone.utc)
+        .replace(tzinfo=None)
+    )
+    await _set_session_date(session_id, moment)
+
+
+def _this_monday() -> date:
+    from services.clock import today_in
+
+    today = today_in(ZoneInfo(TZ_NAME))
+    return today - timedelta(days=today.weekday())
 
 
 @pytest.mark.anyio
@@ -911,7 +1069,8 @@ async def test_weekly_progress_reports_goal_and_done(client: httpx.AsyncClient):
     await _train(client, filled[0]["id"])
     boot = (await client.get("/api/bootstrap", headers=TZ_HEADERS)).json()
     assert boot["week"]["done"] == 1
-    assert boot["week"]["streak"] == 1          # эта неделя уже засчитана в серию
+    # Одна тренировка из трёх серию не открывает: неделя войдёт в неё только закрытой.
+    assert boot["week"]["streak"] == 0
 
 
 @pytest.mark.anyio
@@ -955,18 +1114,66 @@ async def test_weekly_left_ignores_days_already_behind(client: httpx.AsyncClient
     assert boot["week"]["left"] == (1 if yesterday_ahead else 0)
 
 
-@pytest.mark.anyio
-async def test_weekly_streak_counts_consecutive_weeks(client: httpx.AsyncClient):
-    """Серия — недели подряд, где была хотя бы одна тренировка."""
-    filled = await _program_with_days(client, "Серия", [0, 1])
+async def _week_of(client: httpx.AsyncClient, day_id: int, days: list[date]):
+    """Отрабатывает переданные даты — по тренировке на каждую."""
+    for day in days:
+        await _backdate_to(await _train(client, day_id), day)
 
-    await _train(client, filled[0]["id"])                # тренировка этой недели
-    prev = await _train(client, filled[1]["id"])         # ещё одна, сегодня же
-    await _backdate(prev, days=7)                         # отодвигаем её в прошлую неделю
+
+@pytest.mark.anyio
+async def test_weekly_streak_counts_only_weeks_where_the_goal_was_met(client: httpx.AsyncClient):
+    """
+    В серию идут недели, где цель ЗАКРЫТА, а не те, где просто была тренировка.
+
+    Раньше хватало одного похода в зал, и серия росла месяцами у человека, который
+    из четырёх запланированных дней делал один: карточка показывала «серия: 8 недель»
+    рядом с кольцом 0/4. Число обязано означать то, чем его называют.
+    """
+    filled = await _program_with_days(client, "Серия", [0, 1])   # цель — два дня в неделю
+    monday = _this_monday()
+    prev, prev2 = monday - timedelta(days=7), monday - timedelta(days=14)
+
+    await _week_of(client, filled[0]["id"], [prev, prev + timedelta(days=1)])   # закрыта
+    await _week_of(client, filled[0]["id"], [prev2])                            # 1 из 2
 
     boot = (await client.get("/api/bootstrap", headers=TZ_HEADERS)).json()
-    assert boot["week"]["done"] == 1                      # на этой неделе — одна
-    assert boot["week"]["streak"] == 2                    # эта + прошлая
+    assert boot["week"]["goal"] == 2
+    assert boot["week"]["done"] == 0
+    # Грейс на текущую, прошлая закрыта, позапрошлая — нет: цепочка длиной в неделю.
+    assert boot["week"]["streak"] == 1
+
+    # Добрали позапрошлую до цели — серия удлинилась, а не осталась прежней.
+    await _week_of(client, filled[0]["id"], [prev2 + timedelta(days=1)])
+    boot = (await client.get("/api/bootstrap", headers=TZ_HEADERS)).json()
+    assert boot["week"]["streak"] == 2
+
+
+@pytest.mark.anyio
+async def test_weekly_streak_ignores_which_weekdays_were_trained(client: httpx.AsyncClient):
+    """
+    Неделя закрывается ЧИСЛОМ тренировок, а не попаданием в расписание.
+
+    Цель задана количеством дней, поэтому отработанная в среду субботняя программа
+    закрывает неделю наравне с субботней. Иначе «серия» наказывала бы за перенос,
+    хотя сам перенос приложение поощряет — кнопкой «Отработать» и выбором дня.
+    """
+    from services.clock import today_in
+
+    filled = await _program_with_days(client, "Не по расписанию", [0, 1])
+
+    # Дни программы — сегодняшний и вчерашний; тренироваться будем в другие.
+    today = today_in(ZoneInfo(TZ_NAME))
+    scheduled = {today.weekday(), (today - timedelta(days=1)).weekday()}
+
+    prev = _this_monday() - timedelta(days=7)
+    free = [prev + timedelta(days=i) for i in range(7)
+            if (prev + timedelta(days=i)).weekday() not in scheduled][:2]
+
+    await _week_of(client, filled[0]["id"], free)
+
+    boot = (await client.get("/api/bootstrap", headers=TZ_HEADERS)).json()
+    assert boot["week"]["goal"] == 2
+    assert boot["week"]["streak"] == 1
 
 
 @pytest.mark.anyio
@@ -989,3 +1196,48 @@ async def test_weekly_streak_has_grace_but_resets_on_a_full_gap(client: httpx.As
     await _backdate(session_id, days=14)
     boot = (await client.get("/api/bootstrap", headers=TZ_HEADERS)).json()
     assert boot["week"]["streak"] == 0
+
+
+# ---------------------------------------------------------------- календарь активности
+
+
+@pytest.mark.anyio
+async def test_activity_calendar_counts_days_not_sessions(client: httpx.AsyncClient):
+    """
+    Подпись над сеткой считает ДНИ, потому что клетка сетки — это день.
+
+    Две тренировки за сутки красят один квадрат, поэтому «19 тренировок» над
+    восемнадцатью квадратами читалось как сбой отрисовки, а не как «дважды сходил».
+    """
+    filled = await _program_with_days(client, "Календарь", [0])
+
+    await _train(client, filled[0]["id"])
+    await _train(client, filled[0]["id"])          # вторая сессия в тот же день
+
+    activity = (await client.get("/api/stats/activity", headers=TZ_HEADERS)).json()
+    assert activity["active_days"] == 1
+    assert activity["days"][-1]["sets"] == 2       # подходы обеих сессий в одной клетке
+
+
+@pytest.mark.anyio
+async def test_activity_calendar_starts_on_monday_and_ends_today(client: httpx.AsyncClient):
+    """
+    Сетка выровнена на понедельник и обрывается сегодняшним днём.
+
+    Понедельник — потому что колонка это неделя, а строка день недели: без выравнивания
+    столбцы поехали бы и соседние квадраты оказались бы разными днями. А хвост текущей
+    недели сервер не досылает: будущих дней не существует, пустые клетки под форму
+    последней колонки дорисовывает клиент (`heatmap()` в profile.js).
+    """
+    activity = (await client.get("/api/stats/activity", headers=TZ_HEADERS)).json()
+
+    assert date.fromisoformat(activity["start"]).weekday() == 0
+    assert activity["days"][0]["date"] == activity["start"]
+    assert activity["days"][-1]["date"] == activity["today"]
+    assert len(activity["days"]) == 7 * (activity["weeks"] - 1) + _this_monday_offset() + 1
+
+
+def _this_monday_offset() -> int:
+    from services.clock import today_in
+
+    return today_in(ZoneInfo(TZ_NAME)).weekday()

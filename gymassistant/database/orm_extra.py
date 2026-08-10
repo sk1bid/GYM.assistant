@@ -11,7 +11,7 @@
 
 Импортов aiogram тут нет и быть не должно: модуль общий для бота и Mini App.
 """
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from sqlalchemy import Float, cast, delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -216,13 +216,21 @@ async def orm_get_sessions_summary(session: AsyncSession, user_id: int, limit: i
     return (await session.execute(stmt)).all()
 
 
-async def orm_get_trained_day_ids(session: AsyncSession, user_id: int, since) -> set[int]:
+async def orm_get_last_training_per_day(session: AsyncSession, user_id: int, since) -> dict[int, datetime]:
     """
-    Дни программы, по которым тренировались начиная с `since`.
+    Для каждого дня программы — КОГДА по нему тренировались в последний раз.
 
     Нужно, чтобы понять, что пропущено. Сравнение идёт по дню ПРОГРАММЫ, а не по
     календарной дате: отработать понедельник во вторник — это не пропуск, а перенос,
     и напоминать о нём не надо.
+
+    Отдаём момент, а не просто «да/нет». Раньше здесь было множество id, и день
+    считался закрытым, если по нему вообще была тренировка за последние семь суток —
+    БЕЗ ОГЛЯДКИ на то, случилась она раньше самого дня или позже. Отсюда вылезал
+    чужой день: отработал прошлое воскресенье во вторник — и в понедельник сервер
+    считал закрытым уже НАСТУПИВШЕЕ воскресенье, а «пропущенной» показывал субботу.
+    Одна и та же тренировка не может закрыть два повтора дня недели подряд, поэтому
+    вызывающий сверяет дату сессии с датой самого дня (`missed_day` в routers/schedule.py).
 
     Тренировкой считается сессия, в которой есть хотя бы один подход. Пустая — это
     «открыл и передумал»: она и так живёт до первой уборки (`orm_delete_empty_sessions`),
@@ -232,16 +240,16 @@ async def orm_get_trained_day_ids(session: AsyncSession, user_id: int, since) ->
     """
     has_sets = select(Set.id).where(Set.training_session_id == TrainingSession.id).exists()
     stmt = (
-        select(TrainingSession.training_day_id)
+        select(TrainingSession.training_day_id, func.max(TrainingSession.date))
         .where(
             TrainingSession.user_id == user_id,
             TrainingSession.date >= since,
             TrainingSession.training_day_id.isnot(None),
             has_sets,
         )
-        .distinct()
+        .group_by(TrainingSession.training_day_id)
     )
-    return {row for row in (await session.execute(stmt)).scalars().all()}
+    return {day_id: last for day_id, last in (await session.execute(stmt)).all()}
 
 
 async def orm_delete_empty_sessions(session: AsyncSession, user_id: int, older_than_hours: int = 12):

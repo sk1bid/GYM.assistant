@@ -183,10 +183,9 @@ async def activity(user: CurrentUser, session: Session, tz: ClientTz, weeks: int
         if not (start <= local <= today):
             continue
 
-        cell = by_day.setdefault(local, {"sets": 0, "volume": 0.0, "sessions": 0})
+        cell = by_day.setdefault(local, {"sets": 0, "volume": 0.0})
         cell["sets"] += row.sets
         cell["volume"] += float(row.volume)
-        cell["sessions"] += 1
 
     days = []
     for offset in range((today - start).days + 1):
@@ -204,10 +203,10 @@ async def activity(user: CurrentUser, session: Session, tz: ClientTz, weeks: int
         "today": today.isoformat(),
         "weeks": weeks,
         "days": days,
-        # Насыщенность клетки клиент считает сам, по квартилям своих же тренировочных
-        # дней (см. heatmap() в profile.js). Максимум остаётся как справочная величина.
-        "max_sets": max((d["sets"] for d in days), default=0),
-        "sessions": sum(c["sessions"] for c in by_day.values()),
+        # Дни, а не сессии: подпись стоит прямо над сеткой, а клетка сетки — это день.
+        # Две тренировки за сутки — один закрашенный квадрат, и «19 тренировок»
+        # над восемнадцатью квадратами читалось как ошибка отрисовки.
+        "active_days": len(by_day),
     }
 
 
