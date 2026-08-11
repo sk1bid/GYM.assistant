@@ -36,7 +36,11 @@ route('/program/:id', programScreen);
 route('/catalog/:dayId', catalogScreen);
 route('/catalog/:dayId/:categoryId', categoryScreen);
 route('/day/:dayId/exercise/:id', exerciseScreen);
+
+// С днём — пришли посреди сборки дня, и созданное упражнение сразу в него ляжет;
+// без дня — просто правим свой список.
 route('/my-exercises', myExercisesScreen);
+route('/my-exercises/:dayId', myExercisesScreen);
 
 route('/profile', profileScreen);
 route('/history', historyScreen);

@@ -54,14 +54,35 @@ CATALOG = [
     ("Планка", "Статика на кор", "Пресс"),
     ("Русские скручивания", "Косые мышцы живота", "Пресс"),
     # Трапеции
-    ("Шраги со штангой", "Трапеции", "Трап."),
-    ("Шраги с гантелями", "Трапеции, больше амплитуда", "Трап."),
+    ("Шраги со штангой", "Трапеции", "Трапеции"),
+    ("Шраги с гантелями", "Трапеции, больше амплитуда", "Трапеции"),
 ]
+
+# Категории, которые надо переименовать в уже заведённых базах.
+#
+# «Трап.» приехало из бота и вылезало прямо в каталог: среди «Грудь», «Спина»,
+# «Ноги» одна группа выглядела обрезанной, то есть читалась как съехавшая вёрстка,
+# а не как название. Правим здесь, а не миграцией: orm_create_categories заполняет
+# таблицу только пока она пуста, поэтому на живых базах список категорий иначе
+# не меняется вовсе.
+RENAMED_CATEGORIES = {"Трап.": "Трапеции"}
 
 
 async def seed_catalog(session: AsyncSession) -> None:
     """Досыпает в каталог недостающие пресеты. Существующие не трогает."""
     # orm_get_categories отдаёт пары (категория, счётчик) — счётчик нам не нужен.
+    known = {c.name: c for c, _ in await orm_get_categories(session, user_id=0)}
+
+    renamed = [
+        category for old, new in RENAMED_CATEGORIES.items()
+        if (category := known.get(old)) is not None and new not in known
+    ]
+    for category in renamed:
+        category.name = RENAMED_CATEGORIES[category.name]
+    if renamed:
+        await session.commit()
+        logging.info("категории переименованы: %s", len(renamed))
+
     categories = {c.name: c.id for c, _ in await orm_get_categories(session, user_id=0)}
     existing = {e.name for e in await orm_get_admin_exercises(session)}
 

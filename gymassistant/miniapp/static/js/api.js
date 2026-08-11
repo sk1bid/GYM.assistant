@@ -92,7 +92,8 @@ export const api = {
 
   programs: {
     list:       () => request('GET', 'api/programs'),
-    create:     (name) => request('POST', 'api/programs', { name }),
+    templates:  () => request('GET', 'api/programs/templates'),
+    create:     (name, template = null) => request('POST', 'api/programs', { name, template }),
     update:     (id, changes) => request('PATCH', `api/programs/${id}`, changes),
     activate:   (id) => request('POST', `api/programs/${id}/activate`),
     deactivate: (id) => request('POST', `api/programs/${id}/deactivate`),
@@ -102,6 +103,9 @@ export const api = {
 
   exercises: {
     add:    (dayId, payload) => request('POST', `api/days/${dayId}/exercises`, payload),
+    // Пачкой — одним запросом, чтобы порядок упражнений в дне был тот же, что
+    // в списке выбора: подряд идущие круговые собираются в один круговой блок.
+    addMany: (dayId, items) => request('POST', `api/days/${dayId}/exercises/batch`, { items }),
     update: (id, changes) => request('PATCH', `api/exercises/${id}`, changes),
     move:   (id, up) => request('POST', `api/exercises/${id}/move?up=${up}`),
     remove: (id) => request('DELETE', `api/exercises/${id}`),

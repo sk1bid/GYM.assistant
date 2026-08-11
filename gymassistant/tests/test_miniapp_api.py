@@ -5,7 +5,7 @@
 способ поймать баги вроде UUID-подхода, которые на Postgres молчат, а на SQLite падают.
 
 Запуск (из каталога gymassistant/):
-    ./miniapp/.venv/bin/pytest tests/ -q
+    ./.venv-bot/bin/pytest tests/ -q
 """
 import hashlib
 import hmac
@@ -1241,3 +1241,151 @@ def _this_monday_offset() -> int:
     from services.clock import today_in
 
     return today_in(ZoneInfo(TZ_NAME)).weekday()
+
+
+# ---------------------------------------------------------------- сборка программы
+
+
+@pytest.mark.anyio
+async def test_exercises_are_added_in_one_batch_keeping_their_order(client: httpx.AsyncClient):
+    """
+    Пачка ложится в день в том же порядке, в каком приехала.
+
+    Порядок здесь не косметика: подряд идущие круговые собираются в ОДИН круговой
+    блок, поэтому перестановка меняет саму структуру тренировки. Ради этого пачка
+    и добавляется одним запросом — отдельные параллельные запросы с клиента
+    завершаются как придётся, и структура зависела бы от сети.
+    """
+    program = (await client.post("/api/programs", json={"name": "Пачка"})).json()["program"]
+    day = (await client.get(f"/api/programs/{program['id']}/days")).json()["days"][0]
+
+    back = next(
+        c for c in (await client.get("/api/catalog")).json()["categories"] if c["name"] == "Спина"
+    )
+    picks = (await client.get(f"/api/catalog/{back['id']}")).json()["exercises"][:3]
+
+    added = (await client.post(f"/api/days/{day['id']}/exercises/batch", json={
+        "items": [{"admin_exercise_id": p["id"], "circle_training": False} for p in picks],
+    })).json()
+
+    assert [e["name"] for e in added["exercises"]] == [p["name"] for p in picks]
+
+    # Второй заход дописывает в конец, а не смешивается с уже лежащим.
+    tail = (await client.post(f"/api/days/{day['id']}/exercises/batch", json={
+        "items": [{"admin_exercise_id": picks[0]["id"], "circle_training": True}],
+    })).json()["exercises"]
+
+    assert len(tail) == 4
+    assert tail[-1]["circle"] is True
+
+
+@pytest.mark.anyio
+async def test_catalog_carries_every_exercise_for_search(client: httpx.AsyncClient):
+    """
+    Каталог отдаёт и группы, и плоский список — по нему ищет клиент.
+
+    Ходить на сервер за каждой буквой нельзя: круг до пода 50–90 мс, поиск обязан
+    отвечать мгновенно. Плоский список нужен ещё и затем, чтобы искать СРАЗУ ПО
+    ВСЕМ группам: помнить, «жим стоя» — это дельты или грудь, пользователь не должен.
+    """
+    catalog = (await client.get("/api/catalog")).json()
+    names = {e["name"] for e in catalog["exercises"]}
+
+    assert "Жим штанги лёжа" in names
+    assert {e["category_id"] for e in catalog["exercises"]} <= {c["id"] for c in catalog["categories"]}
+
+    # Своё упражнение видно в том же списке — иначе поиск бы его не нашёл.
+    arms = next(c for c in catalog["categories"] if c["name"] == "Руки")
+    created = (await client.post("/api/user-exercises", json={
+        "name": "Молотки лёжа", "description": "", "category_id": arms["id"],
+    })).json()["exercise"]
+
+    catalog = (await client.get("/api/catalog")).json()
+    mine = next(e for e in catalog["exercises"] if e["id"] == created["id"] and e["kind"] == "user")
+    assert mine["name"] == "Молотки лёжа"
+
+
+@pytest.mark.anyio
+async def test_the_renamed_category_is_not_a_stub(client: httpx.AsyncClient):
+    """«Трап.» читалось как обрезок и съехавшая вёрстка, а не как название группы."""
+    names = {c["name"] for c in (await client.get("/api/catalog")).json()["categories"]}
+
+    assert "Трапеции" in names
+    assert "Трап." not in names
+
+
+@pytest.mark.anyio
+async def test_a_template_creates_a_filled_program(client: httpx.AsyncClient):
+    """
+    Готовая программа создаётся сразу с упражнениями — в этом весь её смысл.
+
+    Пустые семь дней «отдых» — это чистый лист, на котором новичок и застревает:
+    он не знает ни какие упражнения брать, ни сколько дней в неделю ходить. Собирает
+    сервер, а не клиент двадцатью запросами: программа обязана появиться либо целиком,
+    либо никак.
+    """
+    templates = (await client.get("/api/programs/templates")).json()["templates"]
+    template = next(t for t in templates if t["id"] == "ppl3")
+
+    program = (await client.post("/api/programs", json={
+        "name": template["name"], "template": template["id"],
+    })).json()["program"]
+
+    days = (await client.get(f"/api/programs/{program['id']}/days")).json()["days"]
+    filled = {d["day_of_week"]: [e["name"] for e in d["exercises"]] for d in days if d["exercises"]}
+
+    assert len(filled) == template["days"]
+    for preview in template["preview"]:
+        assert filled[preview["day_of_week"]] == preview["exercises"]
+
+    # Остальные дни остаются выходными, а не заводятся пустыми копиями.
+    assert len(days) == 7
+
+    # И программа сразу активна — ею для того и создают.
+    boot = (await client.get("/api/bootstrap", headers=TZ_HEADERS)).json()
+    assert boot["has_program"] is True
+
+
+@pytest.mark.anyio
+async def test_an_unknown_template_is_refused_rather_than_silently_empty(client: httpx.AsyncClient):
+    """Опечатка в id шаблона обязана быть слышной: пустая программа выглядит как своя."""
+    response = await client.post("/api/programs", json={"name": "Опечатка", "template": "нет-такого"})
+    assert response.status_code == 404
+
+
+@pytest.mark.anyio
+async def test_the_category_rename_lands_on_an_already_filled_base(client: httpx.AsyncClient):
+    """
+    Переименование доезжает до баз, заведённых ДО него, — то есть до прода.
+
+    Свежая база получает правильное имя из text_for_db, а вот живую иначе не
+    поправить вовсе: orm_create_categories заполняет таблицу, только пока она пуста,
+    и на непустой молча выходит. Поэтому имя чинит seed_catalog при старте, и
+    проверять надо именно этот путь: возвращаем старое имя и прогоняем сев заново.
+    """
+    from sqlalchemy import select, update
+
+    from database.models import ExerciseCategory
+
+    async with session_maker() as db:
+        await db.execute(
+            update(ExerciseCategory)
+            .where(ExerciseCategory.name == "Трапеции")
+            .values(name="Трап.")
+        )
+        await db.commit()
+
+    assert "Трап." in {c["name"] for c in (await client.get("/api/catalog")).json()["categories"]}
+
+    async with session_maker() as db:
+        await seed_catalog(db)
+
+    catalog = (await client.get("/api/catalog")).json()["categories"]
+    assert "Трапеции" in {c["name"] for c in catalog}
+    assert "Трап." not in {c["name"] for c in catalog}
+
+    # Категория та же самая, а не новая рядом со старой: упражнения остались при ней.
+    async with session_maker() as db:
+        rows = (await db.execute(select(ExerciseCategory))).scalars().all()
+    assert len([c for c in rows if c.name in ("Трапеции", "Трап.")]) == 1
+    assert next(c["count"] for c in catalog if c["name"] == "Трапеции") >= 2

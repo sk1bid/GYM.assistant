@@ -692,6 +692,111 @@ label {
   transform: translateX(20px); background: var(--on-primary);
 }
 
+/* ---------------------------------------------------------------- сборка программы */
+
+/* Поиск по каталогу: одно поле над группами, ищет сразу по всем. */
+.search {
+  width: 100%; margin-bottom: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  background: var(--surface-container); color: var(--on-surface);
+  border: 0; border-radius: var(--shape-full); font-size: 15px;
+}
+.search::placeholder { color: var(--on-surface-variant); }
+.search:focus { outline: 2px solid var(--primary); outline-offset: -2px; }
+
+/*
+  Список с галочками. Упражнения берут пачками, поэтому строка — не переход
+  «выбрал и уехал», а отметка: тап меняет только галочку, экран остаётся на месте.
+*/
+.pick-list { padding-bottom: var(--sp-2); }
+
+.pick {
+  display: flex; align-items: center; gap: var(--sp-3);
+  padding: var(--sp-3) 0; margin: 0;
+  border-bottom: 1px solid var(--outline-variant);
+  cursor: pointer;
+}
+.pick:last-child { border-bottom: 0; }
+.pick input { display: none; }
+.pick .title { font-weight: 500; font-size: 15px; }
+.pick .sub   { font-size: 13px; color: var(--on-surface-variant); }
+
+.pick .box {
+  flex: 0 0 22px; width: 22px; height: 22px;
+  border: 2px solid var(--outline); border-radius: var(--shape-sm);
+  position: relative;
+  transition: background var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
+}
+.pick input:checked + .box { background: var(--primary); border-color: var(--primary); }
+.pick input:checked + .box::after {
+  content: ""; position: absolute; left: 6px; top: 2px;
+  width: 5px; height: 10px; border: solid var(--on-primary);
+  border-width: 0 2px 2px 0; transform: rotate(45deg);
+}
+
+/*
+  Панель действия — липкая, над нижней навигацией.
+
+  В конце списка ей не место: до конца пришлось бы доскроллить, а решение «хватит,
+  добавляю» созревает на любой строке. Именно sticky, а не fixed: во время свайпа
+  разделов #track получает transform и will-change, а трансформированный предок
+  становится системой отсчёта для fixed — панель уехала бы вместе с экраном.
+  Sticky от этого не зависит и держится за прокрутку страницы.
+
+  Панель стоит последней в разметке, поэтому её появление ничего не сдвигает:
+  список над ней остаётся на месте.
+*/
+.pick-bar {
+  position: sticky; z-index: 30;
+  bottom: calc(var(--nav-h) + env(safe-area-inset-bottom) + var(--sp-2));
+  display: flex; align-items: center; gap: var(--sp-3);
+  margin: var(--sp-4) calc(var(--sp-4) * -1) 0;
+  padding: var(--sp-3) var(--sp-4);
+  background: var(--surface-container);
+  border-top: 1px solid var(--outline-variant);
+}
+.pick-bar .btn { width: auto; flex: 0 0 auto; margin: 0; }
+.switch.compact .track { width: 44px; height: 26px; flex: 0 0 44px; }
+.switch.compact .track::after { width: 14px; height: 14px; top: 4px; left: 4px; }
+.switch.compact input:checked + .track::after {
+  top: 3px; left: 3px; width: 16px; height: 16px; transform: translateX(18px);
+}
+.switch.compact .lead { font-size: 14px; }
+
+/*
+  Круговой блок нарисован блоком.
+
+  Правило «подряд идущие круговые идут в один круг» живёт на сервере (build_plan),
+  а на экране дня круговые стояли обычными строками с одинаковой пилюлей — что их
+  объединяет именно СОСЕДСТВО, понять было неоткуда, хотя перестановка строки
+  меняет структуру тренировки.
+*/
+.circuit {
+  border-left: 2px solid var(--primary);
+  padding-left: var(--sp-3); margin: var(--sp-2) 0;
+  background: var(--surface-container-low); border-radius: 0 var(--shape-md) var(--shape-md) 0;
+}
+.circuit-head {
+  font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase;
+  color: var(--primary); padding: var(--sp-2) 0 0;
+}
+
+/* Подходы прямо в строке дня: их правят чаще всего остального. */
+.num-btn {
+  flex: 0 0 auto; height: 36px; padding: 0 var(--sp-3);
+  border-radius: var(--shape-sm);
+  background: var(--surface-container-high); color: var(--on-surface);
+  font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums;
+  transition: transform var(--dur-fast) var(--ease);
+}
+.num-btn:active { transform: scale(.94); }
+
+/* Два степпера в ряд — вес и повторения это пара, а не иерархия. */
+.pair { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-4); }
+
+/* Незаполненный день программы: подпись зовёт, а не рапортует. */
+.list-item .sub.quiet { color: var(--outline); }
+
 /* ---------------------------------------------------------------- тренировка */
 
 .exercise-name {

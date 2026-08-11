@@ -44,6 +44,8 @@ class RestIn(BaseModel):
 
 class ProgramIn(BaseModel):
     name: str = Field(min_length=1, max_length=MAX_PROGRAM_NAME)
+    # id готовой программы из program_templates.py; None — собираем с нуля.
+    template: str | None = Field(default=None, max_length=32)
 
 
 class ProgramPatchIn(BaseModel):
@@ -61,6 +63,14 @@ class DayExerciseIn(BaseModel):
     admin_exercise_id: int | None = None
     user_exercise_id: int | None = None
     circle_training: bool = False
+
+
+class DayExercisesIn(BaseModel):
+    """
+    Пачка упражнений в день. Потолок стоит на длине списка, а не на числе запросов:
+    добавление идёт последовательно ради порядка, и сотня строк держала бы соединение.
+    """
+    items: list[DayExerciseIn] = Field(min_length=1, max_length=30)
 
 
 class ExercisePatchIn(BaseModel):

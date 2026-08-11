@@ -13,7 +13,7 @@ from database.orm_query import (
 from miniapp.db import Session
 from miniapp.deps import CurrentUser
 from miniapp.ownership import own_day, own_exercise, own_user_exercise
-from miniapp.schemas import DayExerciseIn, ExercisePatchIn
+from miniapp.schemas import DayExerciseIn, DayExercisesIn, ExercisePatchIn
 from miniapp.serializers import exercise_json
 
 router = APIRouter(prefix="/api", tags=["exercises"])
@@ -25,21 +25,18 @@ async def day_exercises(session: Session, day_id: int) -> dict:
     return {"ok": True, "exercises": [exercise_json(e) for e in exercises]}
 
 
-@router.post("/days/{day_id}/exercises")
-async def add_exercise(day_id: int, body: DayExerciseIn, user: CurrentUser, session: Session):
-    """Кладёт упражнение из каталога в конец дня."""
-    await own_day(session, user.user_id, day_id)
-
-    if bool(body.admin_exercise_id) == bool(body.user_exercise_id):
+async def _append_to_day(session: Session, user_id: int, day_id: int, item: DayExerciseIn) -> None:
+    """Одно упражнение каталога в конец дня. Владение днём проверяет вызывающий."""
+    if bool(item.admin_exercise_id) == bool(item.user_exercise_id):
         raise HTTPException(400, "нужно ровно одно: admin_exercise_id или user_exercise_id")
 
-    if body.admin_exercise_id:
-        catalog = await orm_get_admin_exercise(session, body.admin_exercise_id)
+    if item.admin_exercise_id:
+        catalog = await orm_get_admin_exercise(session, item.admin_exercise_id)
         if not catalog:
             raise HTTPException(404, "упражнение не найдено в каталоге")
         kind, link = "admin", {"admin_exercise_id": catalog.id}
     else:
-        catalog = await own_user_exercise(session, user.user_id, body.user_exercise_id)
+        catalog = await own_user_exercise(session, user_id, item.user_exercise_id)
         kind, link = "user", {"user_exercise_id": catalog.id}
 
     await orm_add_exercise(
@@ -47,12 +44,39 @@ async def add_exercise(day_id: int, body: DayExerciseIn, user: CurrentUser, sess
         {
             "name": catalog.name,
             "description": catalog.description,
-            "circle_training": body.circle_training,
+            "circle_training": item.circle_training,
             **link,
         },
         day_id,
         kind,
     )
+
+
+@router.post("/days/{day_id}/exercises")
+async def add_exercise(day_id: int, body: DayExerciseIn, user: CurrentUser, session: Session):
+    """Кладёт упражнение из каталога в конец дня."""
+    await own_day(session, user.user_id, day_id)
+    await _append_to_day(session, user.user_id, day_id, body)
+    return await day_exercises(session, day_id)
+
+
+@router.post("/days/{day_id}/exercises/batch")
+async def add_exercises(day_id: int, body: DayExercisesIn, user: CurrentUser, session: Session):
+    """
+    Кладёт в день сразу несколько упражнений — ровно в том порядке, что прислали.
+
+    Каталог отдаёт упражнения пачкой: человек заходит в «Спину» и берёт оттуда
+    тягу, подтягивания и блок разом, а не возвращается в день за каждым. Порядок
+    здесь не косметика — подряд идущие круговые собираются в ОДИН круговой блок,
+    поэтому упражнения добавляются строго последовательно. Отдельными параллельными
+    запросами с клиента этого было бы не добиться: они завершаются как придётся,
+    и структура тренировки зависела бы от сети.
+    """
+    await own_day(session, user.user_id, day_id)
+
+    for item in body.items:
+        await _append_to_day(session, user.user_id, day_id, item)
+
     return await day_exercises(session, day_id)
 
 

@@ -5,92 +5,210 @@
  * и отдельная ветка настроек, где из всех параметров упражнения можно было менять
  * ровно один — количество подходов. Повторения не менялись никогда: обработчик
  * вызывался только с tp="sets", и base_reps у всех навсегда оставался равен 10.
+ *
+ * Главное, что здесь появилось потом, — ПАЧКА. Упражнения выбирают группами: зашёл
+ * в «Спину», взял тягу, подтягивания и блок. Раньше каждое добавление уводило обратно
+ * в день, и за следующим надо было идти сюда заново: «Добавить» → категория →
+ * упражнение → и ещё вопрос «как выполнять?». Четыре тапа на упражнение, шестнадцать
+ * на день из четырёх — при том, что осмысленный выбор в них ровно один.
  */
 import { api } from './../api.js';
 import { go } from './../router.js';
 import { confirm, haptic } from './../tg.js';
-import { escape, on, onAction, render, sheet } from './../ui.js';
+import { escape, on, onAction, onAll, plural, render, sheet } from './../ui.js';
 
-/** Категории — выбираем, что добавить в день. */
+/**
+ * Категории и поиск по всему каталогу сразу.
+ *
+ * Поиск идёт по списку, приехавшему вместе с категориями, а не запросом на каждую
+ * букву: каталог невелик, а сетевой круг до пода — 50–90 мс, то есть заметная
+ * задержка на каждый символ. Ищем по всем группам вместе — помнить, дельты «жим
+ * стоя» или грудь, пользователь не обязан.
+ */
 export async function catalogScreen({ dayId }) {
-  const { categories } = await api.catalog.categories();
+  const { categories, exercises } = await api.catalog.categories();
 
   render(`
     <h1>Добавить упражнение</h1>
 
-    ${categories.map((category) => `
-      <button class="list-item" data-category="${category.id}">
-        <span class="grow">
-          <span class="title">${escape(category.name)}</span><br>
-          <span class="sub">${category.count} в каталоге</span>
-        </span>
+    <input type="search" id="q" class="search" autocomplete="off"
+           placeholder="Найти упражнение" aria-label="Поиск по каталогу">
+
+    <div id="results" hidden></div>
+
+    <div id="groups">
+      ${categories.map((category) => `
+        <button class="list-item" data-category="${category.id}">
+          <span class="grow">
+            <span class="title">${escape(category.name)}</span><br>
+            <span class="sub">${category.count} в каталоге</span>
+          </span>
+          <span class="chev">›</span>
+        </button>
+      `).join('')}
+
+      <div class="section-title">Своё</div>
+      <button class="list-item" id="mine">
+        <span class="grow"><span class="title">Мои упражнения</span><br>
+          <span class="sub">Создать или изменить</span></span>
         <span class="chev">›</span>
       </button>
-    `).join('')}
-
-    <div class="section-title">Своё</div>
-    <button class="list-item" id="mine">
-      <span class="grow"><span class="title">Мои упражнения</span><br>
-        <span class="sub">Создать или изменить</span></span>
-      <span class="chev">›</span>
-    </button>
+    </div>
   `);
 
   onAction('[data-category]', (node) => go(`/catalog/${dayId}/${node.dataset.category}`));
-  on('#mine', 'click', () => go('/my-exercises'));
+
+  // День передаём дальше: своё упражнение почти всегда заводят посреди сборки дня,
+  // и возвращать человека в каталог руками — тот самый тупик, из-за которого
+  // созданное упражнение приходилось искать заново.
+  on('#mine', 'click', () => go(`/my-exercises/${dayId}`));
+
+  const input = document.getElementById('q');
+  const results = document.getElementById('results');
+  const groups = document.getElementById('groups');
+
+  input.addEventListener('input', () => {
+    const query = input.value.trim().toLowerCase();
+    const empty = query.length < 2;
+
+    results.hidden = empty;
+    groups.hidden = !empty;
+    if (empty) return;
+
+    const found = exercises.filter((e) => e.name.toLowerCase().includes(query));
+
+    results.innerHTML = found.length
+      ? found.map((e) => `
+          <button class="list-item" data-pick="${e.id}" data-kind="${e.kind}">
+            <span class="grow">
+              <span class="title">${escape(e.name)}
+                ${e.kind === 'user' ? '<span class="pill">своё</span>' : ''}</span><br>
+              <span class="sub">${escape(e.description || '')}</span>
+            </span>
+            <span class="chev">+</span>
+          </button>
+        `).join('')
+      : `<div class="empty"><p>Ничего не нашлось.</p>
+           <button class="btn secondary small" id="create-found">Создать своё упражнение</button></div>`;
+
+    // Обработчики вешаются заново на каждый ввод: содержимое блока целиком новое.
+    results.querySelectorAll('[data-pick]').forEach((node) => {
+      node.onclick = async () => {
+        if (node.disabled) return;
+        node.disabled = true;
+        haptic('light');
+        await addToDay(dayId, [{ id: Number(node.dataset.pick), kind: node.dataset.kind }]);
+      };
+    });
+
+    const create = results.querySelector('#create-found');
+    if (create) create.onclick = () => go(`/my-exercises/${dayId}`);
+  });
 }
 
-/** Упражнения категории — тап добавляет в день. */
+/** Отправляет выбранное в день и возвращает туда же. */
+async function addToDay(dayId, picked, circle = false) {
+  await api.exercises.addMany(Number(dayId), picked.map((item) => ({
+    [item.kind === 'admin' ? 'admin_exercise_id' : 'user_exercise_id']: item.id,
+    circle_training: circle,
+  })));
+
+  haptic('success');
+  go(`/day/${dayId}`);
+}
+
+/**
+ * Упражнения категории — отмечаем нужные и добавляем разом.
+ *
+ * Прежде тап добавлял упражнение немедленно и уводил в день, а перед этим ещё
+ * спрашивал шторкой «обычное или круговое». Вопрос задавался КАЖДЫЙ раз, хотя
+ * круговые нужны меньшинству, и тот же самый флаг всё это время жил переключателем
+ * на экране упражнения — один факт вводился дважды. Теперь добавление обычное,
+ * а круг — общий тумблер внизу, на всю пачку сразу: круговой блок и собирается
+ * из подряд идущих упражнений, поодиночке его всё равно не задать.
+ */
 export async function categoryScreen({ dayId, categoryId }) {
   const { exercises } = await api.catalog.category(Number(categoryId));
 
+  // Ключ «вид:id», а не сам объект: id пресета и id личного упражнения — числа из
+  // разных таблиц и вполне могут совпасть.
+  const picked = new Map();
+  const key = (kind, id) => `${kind}:${id}`;
+
   render(`
-    <h1>Выберите упражнение</h1>
+    <h1>Выберите упражнения</h1>
+    <p class="subtitle">Отметьте всё, что нужно, — добавятся одним махом</p>
 
     ${exercises.length ? '' : '<div class="empty">В этой группе пока пусто</div>'}
 
-    ${exercises.map((exercise) => `
-      <button class="list-item" data-add="${exercise.id}" data-kind="${exercise.kind}">
-        <span class="grow">
-          <span class="title">
-            ${escape(exercise.name)}
-            ${exercise.kind === 'user' ? '<span class="pill">своё</span>' : ''}
-          </span><br>
-          <span class="sub">${escape(exercise.description || '')}</span>
-        </span>
-        <span class="chev">+</span>
-      </button>
-    `).join('')}
+    <div class="pick-list">
+      ${exercises.map((exercise) => `
+        <label class="pick" data-kind="${exercise.kind}">
+          <input type="checkbox" value="${exercise.id}">
+          <span class="box"></span>
+          <span class="grow">
+            <span class="title">
+              ${escape(exercise.name)}
+              ${exercise.kind === 'user' ? '<span class="pill">своё</span>' : ''}
+            </span><br>
+            <span class="sub">${escape(exercise.description || '')}</span>
+          </span>
+        </label>
+      `).join('')}
+    </div>
+
+    <button class="list-item mt-3" id="create-own">
+      <span class="grow"><span class="title">Создать своё упражнение</span><br>
+        <span class="sub">Если нужного нет в каталоге</span></span>
+      <span class="chev">+</span>
+    </button>
+
+    <!-- Панель прижата к низу экрана поверх содержимого, а не стоит в конце списка:
+         в конец пришлось бы доскроллить, а решение «добавить» созревает на любой
+         строке. Появляется вместе с первой галочкой; список этого не замечает,
+         потому что место под неё зарезервировано отступом .pick-list. -->
+    <div class="pick-bar" id="bar" hidden>
+      <label class="switch compact">
+        <span class="grow"><span class="lead">Круговым блоком</span></span>
+        <input type="checkbox" id="circle">
+        <span class="track"></span>
+      </label>
+      <button class="btn" id="add">Добавить</button>
+    </div>
   `);
 
-  onAction('[data-add]', async (node) => {
-    const id = Number(node.dataset.add);
-    const kind = node.dataset.kind;
+  const bar = document.getElementById('bar');
+  const button = document.getElementById('add');
 
-    // Круговое или обычное — спрашиваем сразу: от этого зависит, попадёт ли упражнение
-    // в круговой блок вместе с соседями.
-    const form = sheet(`
-      <h2>Как выполнять?</h2>
-      <button class="btn" id="normal">Обычное упражнение</button>
-      <p class="hint mt-2">Все подходы подряд, с отдыхом между ними.</p>
-      <button class="btn secondary mt-4" id="circle">Круговое</button>
-      <p class="hint mt-2">Войдёт в круг вместе с соседними круговыми:
-      по одному подходу каждого, затем следующий круг.</p>
-    `);
+  const sync = () => {
+    bar.hidden = picked.size === 0;
+    button.textContent = `Добавить ${plural(picked.size, 'упражнение', 'упражнения', 'упражнений')}`;
+  };
 
-    const add = async (circle) => {
-      const payload = kind === 'admin'
-        ? { admin_exercise_id: id, circle_training: circle }
-        : { user_exercise_id: id, circle_training: circle };
+  onAll('.pick input', 'change', (input) => {
+    const kind = input.closest('.pick').dataset.kind;
+    const id = Number(input.value);
 
-      await api.exercises.add(Number(dayId), payload);
-      form.close();
-      haptic('success');
-      go(`/day/${dayId}`);
-    };
+    if (input.checked) picked.set(key(kind, id), { id, kind });
+    else picked.delete(key(kind, id));
 
-    form.node.querySelector('#normal').onclick = () => add(false);
-    form.node.querySelector('#circle').onclick = () => add(true);
+    haptic('light');
+    sync();
+  });
+
+  on('#create-own', 'click', () => go(`/my-exercises/${dayId}`));
+
+  onAction('#add', async () => {
+    if (!picked.size) return;
+
+    // Порядок — тот, в котором упражнения стоят на экране, а не в котором их
+    // отмечали: список читается сверху вниз, и круговой блок собирается так же.
+    const order = new Map(exercises.map((e, index) => [key(e.kind, e.id), index]));
+    const items = [...picked.values()].sort(
+      (a, b) => order.get(key(a.kind, a.id)) - order.get(key(b.kind, b.id)),
+    );
+
+    await addToDay(dayId, items, document.getElementById('circle').checked);
   });
 }
 
@@ -164,8 +282,15 @@ export async function exerciseScreen({ dayId, id }) {
   });
 }
 
-/** Личные упражнения: создать, изменить, удалить. */
-export async function myExercisesScreen() {
+/**
+ * Личные упражнения: создать, изменить, удалить.
+ *
+ * `dayId` приезжает, когда сюда пришли посреди сборки дня. Тогда созданное
+ * упражнение сразу и кладётся в этот день — иначе человек, впервые заводящий своё,
+ * упирался в тупик: создал и остался на экране списка, а добавить его в день можно
+ * было только вернувшись в каталог и найдя себя среди пресетов.
+ */
+export async function myExercisesScreen({ dayId } = {}) {
   const [{ exercises }, { categories }] = await Promise.all([
     api.userExercises.list(),
     api.catalog.categories(),
@@ -175,6 +300,7 @@ export async function myExercisesScreen() {
 
   render(`
     <h1>Мои упражнения</h1>
+    ${dayId ? '<p class="subtitle">Созданное сразу добавится в день</p>' : ''}
 
     ${exercises.length ? '' : `
       <div class="empty">
@@ -184,37 +310,37 @@ export async function myExercisesScreen() {
     `}
 
     ${exercises.map((exercise) => `
-      <button class="list-item" data-edit="${exercise.id}">
-        <span class="grow">
+      <div class="ex-row">
+        <button class="ex-main" data-edit="${exercise.id}">
           <span class="title">${escape(exercise.name)}</span><br>
           <span class="sub">${escape(categoryName(exercise.category_id))}</span>
-        </span>
-        <span class="chev">›</span>
-      </button>
+        </button>
+        ${dayId ? `<button class="icon-btn" data-add="${exercise.id}"
+                           aria-label="Добавить в день">+</button>` : ''}
+      </div>
     `).join('')}
 
     <button class="btn secondary mt-4" id="create">Создать упражнение</button>
   `);
 
-  on('#create', 'click', () => editUserExercise(null, categories));
-  onAction('[data-edit]', (node) => {
+  on('#create', 'click', () => editUserExercise(null, categories, dayId));
+  onAll('[data-edit]', 'click', (node) => {
     const exercise = exercises.find((e) => e.id === Number(node.dataset.edit));
-    editUserExercise(exercise, categories);
+    editUserExercise(exercise, categories, dayId);
+  });
+
+  onAction('[data-add]', async (node) => {
+    await addToDay(dayId, [{ id: Number(node.dataset.add), kind: 'user' }]);
   });
 }
 
-function editUserExercise(exercise, categories) {
+function editUserExercise(exercise, categories, dayId) {
   const form = sheet(`
     <h2>${exercise ? 'Изменить' : 'Новое упражнение'}</h2>
 
     <div class="field">
       <label>Название</label>
       <input type="text" id="name" maxlength="150" value="${escape(exercise?.name || '')}">
-    </div>
-
-    <div class="field">
-      <label>Описание</label>
-      <textarea id="description" maxlength="1000">${escape(exercise?.description || '')}</textarea>
     </div>
 
     <div class="field">
@@ -228,7 +354,14 @@ function editUserExercise(exercise, categories) {
       </select>
     </div>
 
-    <button class="btn" id="save">Сохранить</button>
+    <!-- Описание последним и подписано необязательным: без него упражнение
+         прекрасно работает, а тремя равнозначными полями форма выглядела анкетой. -->
+    <div class="field">
+      <label>Описание <span class="hint">— не обязательно</span></label>
+      <textarea id="description" maxlength="1000">${escape(exercise?.description || '')}</textarea>
+    </div>
+
+    <button class="btn" id="save">${exercise || !dayId ? 'Сохранить' : 'Создать и добавить в день'}</button>
     ${exercise ? '<button class="btn danger mt-2" id="remove">Удалить</button>' : ''}
   `);
 
@@ -241,12 +374,20 @@ function editUserExercise(exercise, categories) {
 
     if (!payload.name) return;
 
-    if (exercise) await api.userExercises.update(exercise.id, payload);
-    else await api.userExercises.create(payload);
+    if (exercise) {
+      await api.userExercises.update(exercise.id, payload);
+      form.close();
+      haptic('success');
+      return myExercisesScreen({ dayId });
+    }
 
+    const created = await api.userExercises.create(payload);
     form.close();
     haptic('success');
-    myExercisesScreen();
+
+    // Пришли из дня — за этим сюда и шли: кладём созданное туда и уходим.
+    if (dayId) return addToDay(dayId, [{ id: created.exercise.id, kind: 'user' }]);
+    myExercisesScreen({ dayId });
   };
 
   const removeButton = form.node.querySelector('#remove');
@@ -259,7 +400,7 @@ function editUserExercise(exercise, categories) {
       await api.userExercises.remove(exercise.id);
       form.close();
       haptic('warning');
-      myExercisesScreen();
+      myExercisesScreen({ dayId });
     };
   }
 }

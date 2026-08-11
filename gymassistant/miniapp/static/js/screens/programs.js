@@ -48,31 +48,93 @@ function paintPrograms(programs) {
   `);
 
   onAction('[data-open]', (node) => go(`/program/${node.dataset.open}`));
+  on('#create', 'click', createProgram);
+}
 
-  on('#create', 'click', () => {
-    const form = sheet(`
-      <h2>Новая программа</h2>
-      <div class="field">
-        <label>Название</label>
-        <input type="text" id="name" maxlength="50" placeholder="Например: Силовая, 3 дня">
-      </div>
-      <p class="hint">
-        Создадутся все семь дней недели — заполните те, в которые тренируетесь.
-        Программа сразу станет активной.
-      </p>
-      <button class="btn mt-4" id="save">Создать</button>
-    `);
+/**
+ * Создание программы: сначала ЧТО, потом как назвать.
+ *
+ * Раньше здесь было голое поле названия и обещание «создадутся все семь дней». Тому,
+ * кто знает, что такое сплит, этого хватало; новичок же получал семь строк «отдых»
+ * и оставался с ними один на один — он не знает ни какие упражнения брать, ни
+ * сколько дней в неделю ходить. Готовая программа снимает ровно этот барьер:
+ * править готовое умеют все, сочинять с чистого листа — далеко не все.
+ *
+ * Шторка вызывается и с главной, где пустое состояние ведёт прямо сюда: раньше
+ * кнопка «Создать программу» открывала СПИСОК программ с такой же кнопкой внутри,
+ * то есть лишний экран на самом первом шаге новичка.
+ */
+export async function createProgram() {
+  const { templates } = await api.programs.templates();
 
-    form.node.querySelector('#save').onclick = async () => {
-      const name = form.node.querySelector('#name').value.trim();
-      if (!name) return;
+  const form = sheet(`
+    <h2>Новая программа</h2>
+    <p class="hint">Возьмите готовую и поправьте под себя — или соберите свою.</p>
 
-      const { program } = await api.programs.create(name);
+    ${templates.map((template) => `
+      <button class="list-item" data-template="${template.id}">
+        <span class="grow">
+          <span class="title">${escape(template.name)}</span><br>
+          <span class="sub">${escape(template.subtitle)}</span><br>
+          <span class="sub num">${plural(template.days, 'день', 'дня', 'дней')} ·
+            ${escape(template.preview.map((d) => d.exercises.length).join(' + '))} упражнений</span>
+        </span>
+        <span class="chev">›</span>
+      </button>
+    `).join('')}
+
+    <div class="section-title">Или с нуля</div>
+    <button class="list-item" data-template="">
+      <span class="grow">
+        <span class="title">Пустая программа</span><br>
+        <span class="sub">Семь дней недели, упражнения добавите сами</span>
+      </span>
+      <span class="chev">›</span>
+    </button>
+  `);
+
+  form.node.querySelectorAll('[data-template]').forEach((button) => {
+    button.onclick = () => {
+      const id = button.dataset.template || null;
       form.close();
-      haptic('success');
-      go(`/program/${program.id}`);
+      nameProgram(id, templates.find((t) => t.id === id));
     };
   });
+}
+
+/** Второй шаг: название. У готовой программы оно уже подставлено. */
+function nameProgram(templateId, template) {
+  const form = sheet(`
+    <h2>Как назовём?</h2>
+
+    <div class="field">
+      <label>Название</label>
+      <input type="text" id="name" maxlength="50" placeholder="Например: Силовая, 3 дня"
+             value="${escape(template?.name || '')}">
+    </div>
+
+    ${template ? `
+      <p class="hint">${escape(template.preview.map((d) => d.day_of_week).join(' · '))} —
+      остальные дни останутся выходными. Всё это потом правится.</p>
+    ` : `
+      <p class="hint">Создадутся все семь дней недели — заполните те, в которые
+      тренируетесь. Программа сразу станет активной.</p>
+    `}
+
+    <button class="btn mt-4" id="save">Создать</button>
+  `);
+
+  const input = form.node.querySelector('#name');
+
+  form.node.querySelector('#save').onclick = async () => {
+    const name = input.value.trim();
+    if (!name) return;
+
+    const { program } = await api.programs.create(name, templateId);
+    form.close();
+    haptic('success');
+    go(`/program/${program.id}`);
+  };
 }
 
 /** Одна программа: дни, активация, настройки, удаление. */
@@ -80,18 +142,30 @@ export async function programScreen({ id }) {
   const data = await api.programs.days(Number(id));
   const program = data.program;
 
+  const filled = data.days.filter((day) => day.exercises.length).length;
+
   render(`
     <h1>${escape(program.name)}</h1>
     <p class="subtitle">${program.active ? 'Активная программа' : 'Не активна'}</p>
+
+    <!-- Пока не заполнен ни один день, экран обязан сказать, что делать: сам по себе
+         список из семи одинаковых строк «отдых» выглядит готовым, а не пустым. -->
+    ${filled ? '' : `
+      <div class="empty">
+        <p>Ни один день ещё не заполнен.</p>
+        <p class="hint">Откройте день недели, в который тренируетесь, и добавьте
+        упражнения. Незаполненные дни — просто выходные.</p>
+      </div>
+    `}
 
     ${data.days.map((day) => `
       <button class="list-item" data-day="${day.id}">
         <span class="grow">
           <span class="title">${escape(day.day_of_week)}</span><br>
-          <span class="sub">
+          <span class="sub${day.exercises.length ? '' : ' quiet'}">
             ${day.exercises.length
               ? escape(day.exercises.map((e) => e.name).join(', '))
-              : 'отдых'}
+              : 'выходной · добавить упражнения'}
           </span>
         </span>
         <span class="chev">›</span>

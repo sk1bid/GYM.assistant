@@ -4,6 +4,7 @@ from fastapi import APIRouter
 from database.orm_query import (
     orm_add_user_exercise,
     orm_delete_user_exercise,
+    orm_get_admin_exercises,
     orm_get_admin_exercises_in_category,
     orm_get_categories,
     orm_get_user_exercises,
@@ -20,11 +21,35 @@ router = APIRouter(prefix="/api", tags=["catalog"])
 
 @router.get("/catalog")
 async def categories(user: CurrentUser, session: Session):
-    """Группы мышц со счётчиком (пресеты + личные упражнения этого пользователя)."""
+    """
+    Группы мышц со счётчиком — и весь каталог плоским списком.
+
+    Плоский список нужен поиску. Каталог невелик (три десятка пресетов плюс свои),
+    поэтому дешевле привезти его целиком одним запросом и искать в памяти вкладки,
+    чем ходить на сервер на каждую букву: поиск по названию обязан отвечать мгновенно,
+    а сетевой круг до пода — 50–90 мс. Заодно это единственный способ искать СРАЗУ
+    ПО ВСЕМ группам: знаешь слово «жим» — не обязан помнить, грудь это или дельты.
+    """
     rows = await orm_get_categories(session, user.user_id)
+    presets = await orm_get_admin_exercises(session)
+    mine = await orm_get_user_exercises(session, user.user_id)
+
     return {
         "ok": True,
         "categories": [{"id": c.id, "name": c.name, "count": count} for c, count in rows],
+        "exercises": (
+            [_flat(e, "admin") for e in presets] + [_flat(e, "user") for e in mine]
+        ),
+    }
+
+
+def _flat(exercise, kind: str) -> dict:
+    return {
+        "id": exercise.id,
+        "name": exercise.name,
+        "description": exercise.description,
+        "category_id": exercise.category_id,
+        "kind": kind,
     }
 
 
@@ -62,7 +87,14 @@ async def create_user_exercise(body: UserExerciseIn, user: CurrentUser, session:
         "user_id": user.user_id,
         "category_id": body.category_id,
     })
-    return {"ok": True}
+
+    # Отдаём созданное обратно, потому что своё упражнение почти всегда заводят
+    # ПРЯМО В МОМЕНТ сборки дня: нужного нет в каталоге — создал и тут же положил.
+    # Без id клиенту пришлось бы перезапрашивать список и искать себя в нём по имени.
+    # orm_add_user_exercise ничего не возвращает (её пишет и бот), поэтому берём
+    # свежайшее по id — тем же приёмом, что и создание программы.
+    created = max(await orm_get_user_exercises(session, user.user_id), key=lambda e: e.id)
+    return {"ok": True, "exercise": _flat(created, "user")}
 
 
 @router.patch("/user-exercises/{user_exercise_id}")

@@ -13,6 +13,7 @@ import { go } from './../router.js';
 import * as rest from './../rest.js';
 import { alert } from './../tg.js';
 import { escape, on, onAll, plural, render, same, sheet } from './../ui.js';
+import { createProgram } from './programs.js';
 
 /**
  * Иконки — инлайновый SVG в стиле навигации (24×24, stroke 1.8, currentColor),
@@ -53,6 +54,7 @@ function paint(data) {
 
   on('#start', 'click', () => go(startPath(data)));
   on('#other-day', 'click', pickDay);
+  on('#new-program', 'click', createProgram);
   on('#do-missed', 'click', () => go(`/workout/${data.missed.id}`));
   onAll('[data-go]', 'click', (node) => go(node.dataset.go));
 }
@@ -150,11 +152,14 @@ function todayBlock(data) {
   if (data.active) return activeBlock(data);
 
   if (!data.has_program) {
+    // Кнопка открывает саму форму, а не список программ. Вести на список было
+    // нечестно: там пусто и стоит такая же кнопка — лишний экран ровно на том шаге,
+    // где человек видит приложение впервые.
     return `
       <h1>Программы ещё нет</h1>
-      <p class="subtitle">Соберите программу — распределите упражнения по дням недели,
+      <p class="subtitle">Возьмите готовую программу или соберите свою —
       и приложение будет вести вас подход за подходом.</p>
-      <button class="btn" data-go="/programs">Создать программу</button>
+      <button class="btn" id="new-program">Создать программу</button>
     `;
   }
 
