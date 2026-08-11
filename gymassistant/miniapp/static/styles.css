@@ -771,19 +771,30 @@ label {
   объединяет именно СОСЕДСТВО, понять было неоткуда, хотя перестановка строки
   меняет структуру тренировки.
 */
-.circuit {
-  border-left: 2px solid var(--primary);
-  padding-left: var(--sp-3); margin: var(--sp-2) 0;
-  background: var(--surface-container-low); border-radius: 0 var(--shape-md) var(--shape-md) 0;
-}
 /*
-  Шапка блока — кнопка: кругов в ней не «сколько упражнений» (их и так видно
-  по строкам), а сколько РАЗ этот круг проходить. Число тут же и правится, чтобы
-  за ним не ходить в настройки программы.
+  Круговой блок нарисован НА СТРОКАХ, а не обёрткой вокруг них.
+
+  Обёртка честнее по разметке, но ломает перетаскивание: строка, уходящая из круга,
+  меняла бы родителя посреди жеста. В плоском списке перестановка — это insertBefore,
+  а принадлежность блоку — полоса слева, которую пересчитывают по соседям (decorate()
+  в schedule.js) тем же правилом, каким её считает build_plan на сервере.
+*/
+.ex-row.in-circuit, .circuit-head {
+  border-left: 2px solid var(--primary);
+  padding-left: var(--sp-3);
+  background: var(--surface-container-low);
+}
+.ex-row.circuit-last { border-radius: 0 0 var(--shape-md) 0; }
+
+/*
+  Шапка блока — кнопка: в ней не «сколько упражнений» (их видно по строкам),
+  а сколько РАЗ проходить круг. Число тут же и правится, чтобы за ним не ходить
+  в настройки программы.
 */
 .circuit-head {
   display: block; width: 100%; text-align: left;
-  background: transparent; padding: var(--sp-2) 0 var(--sp-1);
+  padding: var(--sp-2) 0 var(--sp-1) var(--sp-3);
+  border-radius: 0 var(--shape-md) 0 0;
   font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase;
   color: var(--primary);
 }
@@ -804,8 +815,16 @@ label {
   color: var(--outline);
 }
 
+/*
+  Строки разъезжаются приёмом FLIP из schedule.js: transform ставится покадрово,
+  а переход по нему объявлен здесь — так же, как во всех остальных движениях
+  интерфейса, кривой Material 3.
+*/
+.ex-row { transition: transform var(--dur-base) var(--ease); }
+
+/* Ту, что тащат, поднимаем над остальными и лишаем перехода: она идёт за пальцем. */
 .ex-row.dragging {
-  position: relative; z-index: 20;
+  position: relative; z-index: 20; transition: none;
   background: var(--surface-container-high); border-radius: var(--shape-md);
   box-shadow: 0 8px 24px rgb(0 0 0 / .18);
 }
@@ -813,16 +832,6 @@ label {
 
 /* Пока тащим — гасим выделение текста, иначе палец «красит» названия. */
 body.reordering { user-select: none; -webkit-user-select: none; }
-
-/*
-  Место высадки — линия, а не расступающиеся строки: строки лежат в разных
-  контейнерах (круговой блок оборачивает свои), и раздвигать их пришлось бы
-  с оглядкой на высоту шапки блока. Линия от вёрстки не зависит вовсе.
-*/
-.drop-line {
-  position: absolute; left: 0; right: 0; height: 2px;
-  background: var(--primary); border-radius: 1px; pointer-events: none;
-}
 
 /* Подходы прямо в строке дня: их правят чаще всего остального. */
 .num-btn {

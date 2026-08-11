@@ -60,35 +60,24 @@ function paintSchedule(data) {
   onAction('[data-day]', (node) => go(`/day/${node.dataset.day}`));
 }
 
-/**
- * Круговые блоки — из подряд идущих круговых упражнений.
- *
- * Правило это серверное (`build_plan` в services/workout.py), но до сих пор оно
- * нигде не было видно: круговые стояли обычными строками с одинаковой пилюлей
- * «круговое», и что именно СОСЕДСТВО собирает их в один круг, догадаться было
- * неоткуда. Отсюда и группировка при отрисовке — она просто показывает то, по чему
- * тренировка и так пойдёт.
- */
-function groupExercises(exercises) {
-  const groups = [];
-
-  for (const exercise of exercises) {
-    const last = groups[groups.length - 1];
-    if (exercise.circle && last?.circle) last.items.push(exercise);
-    else groups.push({ circle: exercise.circle, items: [exercise] });
-  }
-
-  return groups;
-}
-
 export async function dayScreen({ id }) {
   const data = await api.day(Number(id));
   const exercises = data.exercises;
   const sets = exercises.reduce((sum, e) => sum + e.sets, 0);
   const rounds = data.program?.circular_rounds || 1;
 
+  /*
+    Список ПЛОСКИЙ: круговой блок обозначен рамкой на строках и шапкой-соседом,
+    а не контейнером вокруг них.
+
+    Обёртка была бы честнее по разметке, но ломает перетаскивание: строка,
+    переезжающая из круга наружу, меняла бы родителя, и вычислять, куда она едет,
+    пришлось бы с оглядкой на две системы координат. В одном контейнере перестановка
+    — это insertBefore, а принадлежность блоку пересчитывается заново по соседям
+    ровно тем же правилом, по которому её считает сервер.
+  */
   const row = (exercise) => `
-    <div class="ex-row" data-id="${exercise.id}">
+    <div class="ex-row" data-id="${exercise.id}" data-circle="${exercise.circle ? 1 : 0}">
       <button class="ex-main" data-edit="${exercise.id}">
         <span class="title">${escape(exercise.name)}</span>
       </button>
@@ -114,24 +103,17 @@ export async function dayScreen({ id }) {
 
     ${exercises.length ? '' : '<div class="empty"><p>Пока пусто.</p></div>'}
 
-    <div class="ex-list" id="list">
-      ${groupExercises(exercises).map((group) => (
-        group.circle
-          ? `<div class="circuit">
-               <button class="circuit-head" data-rounds>
-                 Круговой блок · ${plural(rounds, 'круг', 'круга', 'кругов')}
-               </button>
-               ${group.items.map(row).join('')}
-             </div>`
-          : group.items.map(row).join('')
-      )).join('')}
-      <div class="drop-line" hidden></div>
-    </div>
+    <div class="ex-list" id="list">${exercises.map(row).join('')}</div>
 
     <button class="btn secondary mt-4" data-add>Добавить упражнение</button>
 
     ${exercises.length ? '<button class="btn mt-2" id="start">Начать тренировку</button>' : ''}
   `);
+
+  const list = document.getElementById('list');
+  const openRounds = () => editRounds(data.program, () => dayScreen({ id }));
+
+  decorate(list, rounds, openRounds);
 
   on('#start', 'click', () => go(`/workout/${data.day.id}`));
   onAction('[data-add]', () => go(`/catalog/${data.day.id}`));
@@ -142,16 +124,49 @@ export async function dayScreen({ id }) {
     editSets(exercise, () => dayScreen({ id }));
   });
 
-  onAll('[data-rounds]', 'click', () => {
-    editRounds(data.program, () => dayScreen({ id }));
-  });
-
   // Порядок — не косметика: подряд идущие круговые собираются в один круговой
   // блок, поэтому перетаскивание меняет саму структуру тренировки.
-  reorder(document.getElementById('list'), async (ids) => {
-    await api.exercises.order(data.day.id, ids);
-    haptic('success');
-    await dayScreen({ id });
+  reorder(list, () => decorate(list, rounds, openRounds), async (ids) => {
+    try {
+      await api.exercises.order(data.day.id, ids);
+    } catch (error) {
+      // Экран уже показывает новый порядок — если сервер его не принял, честнее
+      // перерисоваться от него, чем оставить картинку, которой нет в базе.
+      await dayScreen({ id });
+      throw error;
+    }
+  });
+}
+
+/**
+ * Расставляет признаки круговых блоков по плоскому списку.
+ *
+ * Блок — это подряд идущие круговые упражнения, ровно как считает `build_plan`
+ * на сервере. Пересчитывается на каждое перемещение, поэтому строка, вытащенная
+ * из круга, перестаёт быть его частью сразу под пальцем, а не после перезагрузки
+ * экрана: перетаскивание здесь меняет структуру тренировки, и видеть это надо
+ * в момент, когда решение принимается.
+ */
+function decorate(list, rounds, onRounds) {
+  list.querySelectorAll('.circuit-head').forEach((node) => node.remove());
+
+  const rows = [...list.querySelectorAll('.ex-row')];
+
+  rows.forEach((node, index) => {
+    const circle = node.dataset.circle === '1';
+    const before = index > 0 && rows[index - 1].dataset.circle === '1';
+    const after = index < rows.length - 1 && rows[index + 1].dataset.circle === '1';
+
+    node.classList.toggle('in-circuit', circle);
+    node.classList.toggle('circuit-last', circle && !after);
+
+    if (!circle || before) return;
+
+    const head = document.createElement('button');
+    head.className = 'circuit-head';
+    head.textContent = `Круговой блок · ${plural(rounds, 'круг', 'круга', 'кругов')}`;
+    head.onclick = onRounds;
+    list.insertBefore(head, node);
   });
 }
 
@@ -163,56 +178,86 @@ export async function dayScreen({ id }) {
  * тогда жест не спорит ни с прокруткой страницы, ни с длинным нажатием, и не нужен
  * порог задержки, из-за которого перетаскивание всегда начинается с паузы.
  *
- * Место высадки показывает линия, а не расступающиеся строки: строки живут внутри
- * разных контейнеров (круговой блок оборачивает свои), и раздвигать их пришлось бы
- * с оглядкой на высоту шапки блока. Линия от вёрстки не зависит вовсе.
+ * Перестановка происходит СРАЗУ, под пальцем: как только строка перевалила середину
+ * соседа, она меняется с ним местами в разметке, а соседи разъезжаются анимацией.
+ * Раньше здесь была линия-указатель и перерисовка с сервера на отпускании — то есть
+ * названия менялись местами уже после того, как палец отпустил, с задержкой на
+ * сетевой круг. Порядок уезжает на сервер молча, вдогонку; экран его не ждёт,
+ * потому что показывает ровно то, что человек только что сделал руками.
  *
- * У края экрана список подкручивается сам — иначе длинный день пришлось бы возить
- * в два приёма.
+ * Соседей двигаем приёмом FLIP: замерили, где строки были, переставили в разметке,
+ * замерили, где стали, — и проигрываем разницу. Считать смещения самим тут нельзя:
+ * строка, покидающая круговой блок, меняет высоту всего блока (у него появляется
+ * или исчезает шапка), и «сдвинуть на высоту строки» дало бы промах ровно на неё.
  */
-function reorder(list, save) {
+function reorder(list, redecorate, save) {
   if (!list) return;
 
-  let dragged = null;      // строка, которую тащат
-  let rows = [];           // все строки в порядке экрана, с их серединами
-  let target = 0;          // индекс, куда встанет строка
-  let startY = 0;          // где взялись, в координатах СТРАНИЦЫ
+  let dragged = null;
+  let offset = 0;        // на сколько строка смещена от своего места в разметке
+  let lastY = 0;         // прошлая позиция пальца, в координатах СТРАНИЦЫ
+  let order = [];        // порядок на момент начала жеста — с чем сравнивать
   let frame = 0;
 
-  // Считаем от страницы, а не от окна: у края список подкручивается сам, и
-  // в оконных координатах строка уезжала бы из-под пальца ровно на прокрутку.
+  // От страницы, а не от окна: у края список подкручивается сам, и в оконных
+  // координатах строка уезжала бы из-под пальца ровно на величину прокрутки.
   const pageY = (event) => event.clientY + window.scrollY;
+  const ids = () => [...list.querySelectorAll('.ex-row')].map((n) => Number(n.dataset.id));
 
-  const line = list.querySelector('.drop-line');
+  /** Переставляет строку и доводит соседей на новые места. */
+  const shuffle = (mutate) => {
+    const rows = [...list.querySelectorAll('.ex-row')];
+    const was = new Map(rows.map((node) => [node, node.getBoundingClientRect().top]));
+    const before = dragged.getBoundingClientRect().top;
 
-  const measure = () => {
-    rows = [...list.querySelectorAll('.ex-row')].map((node) => {
+    mutate();
+    redecorate();
+
+    // Своё смещение пересчитываем так, чтобы строка не дёрнулась: место в разметке
+    // у неё теперь другое, а под пальцем она обязана остаться там же, где была.
+    offset += before - dragged.getBoundingClientRect().top;
+    dragged.style.transform = `translateY(${offset}px)`;
+
+    for (const node of rows) {
+      if (node === dragged) continue;
+
+      const shift = was.get(node) - node.getBoundingClientRect().top;
+      if (!shift) continue;
+
+      node.style.transition = 'none';
+      node.style.transform = `translateY(${shift}px)`;
+
+      requestAnimationFrame(() => {
+        node.style.transition = '';
+        node.style.transform = '';
+      });
+    }
+
+    haptic('light');
+  };
+
+  /** Перевалили середину соседа — меняемся с ним местами. */
+  const consider = (clientY) => {
+    for (const node of list.querySelectorAll('.ex-row')) {
+      if (node === dragged) continue;
+
       const box = node.getBoundingClientRect();
-      return { node, top: box.top, bottom: box.bottom, middle: box.top + box.height / 2 };
-    });
+      if (clientY < box.top || clientY > box.bottom) continue;
+
+      const middle = box.top + box.height / 2;
+      const above = node.compareDocumentPosition(dragged) & Node.DOCUMENT_POSITION_FOLLOWING;
+
+      if (above && clientY < middle) shuffle(() => node.before(dragged));
+      else if (!above && clientY > middle) shuffle(() => node.after(dragged));
+      return;
+    }
   };
 
-  /** Куда встанет строка, если отпустить палец сейчас. */
-  const place = (y) => {
-    const base = rows.filter((r) => r.node !== dragged);
-    let index = base.findIndex((r) => y < r.middle);
-    if (index < 0) index = base.length;
-
-    target = index;
-
-    const edge = index < base.length
-      ? base[index].top
-      : (base[base.length - 1]?.bottom ?? 0);
-
-    line.hidden = false;
-    line.style.top = `${edge - list.getBoundingClientRect().top}px`;
-  };
-
-  /** Подкрутка у краёв: ближе 72 px к границе — едем со скоростью до 12 px за кадр. */
-  const autoscroll = (y) => {
+  /** У края экрана список едет сам — иначе длинный день пришлось бы возить в два приёма. */
+  const autoscroll = (clientY) => {
     const zone = 72;
-    const speed = y < zone ? -(zone - y) / 6
-      : y > window.innerHeight - zone ? (y - (window.innerHeight - zone)) / 6
+    const speed = clientY < zone ? -(zone - clientY) / 6
+      : clientY > window.innerHeight - zone ? (clientY - (window.innerHeight - zone)) / 6
       : 0;
 
     cancelAnimationFrame(frame);
@@ -221,35 +266,38 @@ function reorder(list, save) {
     const step = () => {
       if (!dragged) return;
       window.scrollBy(0, Math.max(-12, Math.min(12, speed)));
-      measure();
+      consider(clientY);
       frame = requestAnimationFrame(step);
     };
     frame = requestAnimationFrame(step);
   };
 
   list.querySelectorAll('.handle').forEach((handle) => {
-    handle.addEventListener('pointerdown', (event) => {
+    const start = (event) => {
       dragged = handle.closest('.ex-row');
-      startY = pageY(event);
+      offset = 0;
+      lastY = pageY(event);
+      order = ids();
 
       handle.setPointerCapture(event.pointerId);
       dragged.classList.add('dragging');
       document.body.classList.add('reordering');
       haptic('light');
-
-      measure();
-      place(event.clientY);
       event.preventDefault();
-    });
+    };
 
-    handle.addEventListener('pointermove', (event) => {
+    const move = (event) => {
       if (!dragged) return;
 
-      dragged.style.transform = `translateY(${pageY(event) - startY}px)`;
-      place(event.clientY);
+      const y = pageY(event);
+      offset += y - lastY;
+      lastY = y;
+      dragged.style.transform = `translateY(${offset}px)`;
+
+      consider(event.clientY);
       autoscroll(event.clientY);
       event.preventDefault();
-    });
+    };
 
     const drop = async () => {
       if (!dragged) return;
@@ -258,25 +306,37 @@ function reorder(list, save) {
       dragged = null;
       cancelAnimationFrame(frame);
 
-      node.classList.remove('dragging');
+      // Возврат на место — с доводкой: строка уже стоит в нужной позиции разметки,
+      // осталось погасить смещение, накопленное пальцем.
+      //
+      // Снимаем поднятие по таймеру, а не по transitionend: если палец не сдвинул
+      // строку ни на пиксель, гасить нечего, перехода не будет — и события тоже,
+      // а строка так и осталась бы висеть с тенью.
+      const settled = Math.abs(offset) < 1;
+      node.style.transition = settled ? 'none' : '';
       node.style.transform = '';
+
+      setTimeout(() => {
+        node.style.transition = '';
+        node.classList.remove('dragging');
+      }, settled ? 0 : 200);
+
       document.body.classList.remove('reordering');
-      line.hidden = true;
 
-      const ids = rows.map((r) => Number(r.node.dataset.id));
-      const from = ids.indexOf(Number(node.dataset.id));
-      const rest = ids.filter((_, i) => i !== from);
-      rest.splice(target, 0, Number(node.dataset.id));
+      const next = ids();
+      if (next.every((value, index) => value === order[index])) return;
 
-      // Порядок не изменился — сервер дёргать незачем.
-      if (rest.every((value, i) => value === ids[i])) return;
-      await save(rest);
+      haptic('success');
+      await save(next);
     };
 
+    handle.addEventListener('pointerdown', start);
+    handle.addEventListener('pointermove', move);
     handle.addEventListener('pointerup', drop);
     handle.addEventListener('pointercancel', drop);
   });
 }
+
 
 /**
  * Кругов в блоке.
