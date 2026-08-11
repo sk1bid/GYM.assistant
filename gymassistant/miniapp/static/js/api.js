@@ -108,6 +108,8 @@ export const api = {
     addMany: (dayId, items) => request('POST', `api/days/${dayId}/exercises/batch`, { items }),
     update: (id, changes) => request('PATCH', `api/exercises/${id}`, changes),
     move:   (id, up) => request('POST', `api/exercises/${id}/move?up=${up}`),
+    // Порядок целиком: перетаскивание задаёт его одним движением.
+    order:  (dayId, ids) => request('PATCH', `api/days/${dayId}/exercises/order`, { ids }),
     remove: (id) => request('DELETE', `api/exercises/${id}`),
   },
 

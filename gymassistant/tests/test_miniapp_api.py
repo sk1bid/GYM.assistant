@@ -1389,3 +1389,86 @@ async def test_the_category_rename_lands_on_an_already_filled_base(client: httpx
         rows = (await db.execute(select(ExerciseCategory))).scalars().all()
     assert len([c for c in rows if c.name in ("Трапеции", "Трап.")]) == 1
     assert next(c["count"] for c in catalog if c["name"] == "Трапеции") >= 2
+
+
+@pytest.mark.anyio
+async def test_the_whole_order_is_saved_in_one_go(client: httpx.AsyncClient):
+    """
+    Перетаскивание присылает конечный порядок целиком, а не серию обменов соседями.
+
+    Пошаговые move_up/move_down означали бы N запросов на одно движение пальца,
+    и каждое промежуточное состояние сервер записал бы как настоящую программу.
+    """
+    program = (await client.post("/api/programs", json={"name": "Порядок"})).json()["program"]
+    day = (await client.get(f"/api/programs/{program['id']}/days")).json()["days"][0]
+
+    legs = next(
+        c for c in (await client.get("/api/catalog")).json()["categories"] if c["name"] == "Ноги"
+    )
+    picks = (await client.get(f"/api/catalog/{legs['id']}")).json()["exercises"][:3]
+    added = (await client.post(f"/api/days/{day['id']}/exercises/batch", json={
+        "items": [{"admin_exercise_id": p["id"]} for p in picks],
+    })).json()["exercises"]
+
+    ids = [e["id"] for e in added]
+    flipped = list(reversed(ids))
+
+    result = (await client.patch(f"/api/days/{day['id']}/exercises/order",
+                                 json={"ids": flipped})).json()
+    assert [e["id"] for e in result["exercises"]] == flipped
+    assert [e["position"] for e in result["exercises"]] == [0, 1, 2]
+
+    # Порядок держится и после перечитывания дня — это не только ответ обработчика.
+    again = (await client.get(f"/api/day/{day['id']}")).json()["exercises"]
+    assert [e["id"] for e in again] == flipped
+
+
+@pytest.mark.anyio
+async def test_a_partial_order_changes_nothing(client: httpx.AsyncClient):
+    """
+    Неполный список отвергается целиком.
+
+    Разложив по нему позиции, мы оставили бы недосланные упражнения на старых
+    местах — и они перемешались бы с новыми. Порядок здесь определяет структуру
+    тренировки: подряд идущие круговые собираются в один круг.
+    """
+    program = (await client.post("/api/programs", json={"name": "Неполный"})).json()["program"]
+    day = (await client.get(f"/api/programs/{program['id']}/days")).json()["days"][0]
+
+    legs = next(
+        c for c in (await client.get("/api/catalog")).json()["categories"] if c["name"] == "Ноги"
+    )
+    picks = (await client.get(f"/api/catalog/{legs['id']}")).json()["exercises"][:3]
+    added = (await client.post(f"/api/days/{day['id']}/exercises/batch", json={
+        "items": [{"admin_exercise_id": p["id"]} for p in picks],
+    })).json()["exercises"]
+
+    ids = [e["id"] for e in added]
+
+    assert (await client.patch(f"/api/days/{day['id']}/exercises/order",
+                               json={"ids": ids[:2]})).status_code == 400
+    # Дубль вместо пропущенного — тоже мимо: длина сходится, а состав нет.
+    assert (await client.patch(f"/api/days/{day['id']}/exercises/order",
+                               json={"ids": [ids[0], ids[1], ids[1]]})).status_code == 400
+
+    assert [e["id"] for e in (await client.get(f"/api/day/{day['id']}")).json()["exercises"]] == ids
+
+
+@pytest.mark.anyio
+async def test_the_day_carries_the_rounds_of_its_program(client: httpx.AsyncClient):
+    """
+    Экран дня показывает число кругов и правит его на месте.
+
+    Круги — настройка ПРОГРАММЫ: build_plan разворачивает по ней все круговые блоки
+    дня, собственного числа у блока в схеме нет. Поэтому оно и приезжает вместе
+    с днём — иначе за ним пришлось бы уходить в настройки программы.
+    """
+    program = (await client.post("/api/programs", json={"name": "Круги"})).json()["program"]
+    day = (await client.get(f"/api/programs/{program['id']}/days")).json()["days"][0]
+
+    assert (await client.get(f"/api/day/{day['id']}")).json()["program"] == {
+        "id": program["id"], "circular_rounds": 3,
+    }
+
+    await client.patch(f"/api/programs/{program['id']}", json={"circular_rounds": 5})
+    assert (await client.get(f"/api/day/{day['id']}")).json()["program"]["circular_rounds"] == 5

@@ -291,8 +291,18 @@ async def schedule(user: CurrentUser, session: Session, tz: ClientTz):
 async def day(day_id: int, user: CurrentUser, session: Session):
     training_day = await own_day(session, user.user_id, day_id)
     exercises = await orm_get_exercises(session, training_day.id)
+
+    # Кругов в блоке — настройка ПРОГРАММЫ, а не блока: build_plan разворачивает
+    # по ней все круговые блоки дня. Экрану дня она нужна, чтобы показать её прямо
+    # на блоке и дать поправить на месте, не уводя в настройки программы.
+    program = await orm_get_program(session, training_day.training_program_id)
+
     return {
         "ok": True,
         "day": day_json(training_day),
         "exercises": [exercise_json(e) for e in exercises],
+        "program": {
+            "id": program.id,
+            "circular_rounds": program.circular_rounds,
+        } if program else None,
     }

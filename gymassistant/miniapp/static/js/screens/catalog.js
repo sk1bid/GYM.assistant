@@ -89,7 +89,7 @@ export async function catalogScreen({ dayId }) {
           </button>
         `).join('')
       : `<div class="empty"><p>Ничего не нашлось.</p>
-           <button class="btn secondary small" id="create-found">Создать своё упражнение</button></div>`;
+           <button class="btn secondary small" id="create-found">Создать своё</button></div>`;
 
     // Обработчики вешаются заново на каждый ввод: содержимое блока целиком новое.
     results.querySelectorAll('[data-pick]').forEach((node) => {
@@ -136,8 +136,8 @@ export async function categoryScreen({ dayId, categoryId }) {
   const key = (kind, id) => `${kind}:${id}`;
 
   render(`
-    <h1>Выберите упражнения</h1>
-    <p class="subtitle">Отметьте всё, что нужно, — добавятся одним махом</p>
+    <h1>Упражнения</h1>
+    <p class="subtitle">Отметьте нужные</p>
 
     ${exercises.length ? '' : '<div class="empty">В этой группе пока пусто</div>'}
 
@@ -158,7 +158,7 @@ export async function categoryScreen({ dayId, categoryId }) {
     </div>
 
     <button class="list-item mt-3" id="create-own">
-      <span class="grow"><span class="title">Создать своё упражнение</span><br>
+      <span class="grow"><span class="title">Своё упражнение</span><br>
         <span class="sub">Если нужного нет в каталоге</span></span>
       <span class="chev">+</span>
     </button>
@@ -300,12 +300,12 @@ export async function myExercisesScreen({ dayId } = {}) {
 
   render(`
     <h1>Мои упражнения</h1>
-    ${dayId ? '<p class="subtitle">Созданное сразу добавится в день</p>' : ''}
+    ${dayId ? '<p class="subtitle">Добавится в день</p>' : ''}
 
     ${exercises.length ? '' : `
       <div class="empty">
-        <p>Своих упражнений пока нет.</p>
-        <p class="hint">Добавьте то, чего нет в каталоге.</p>
+        <p>Пока пусто.</p>
+        <p class="hint">Здесь живёт то, чего нет в каталоге.</p>
       </div>
     `}
 
@@ -357,11 +357,11 @@ function editUserExercise(exercise, categories, dayId) {
     <!-- Описание последним и подписано необязательным: без него упражнение
          прекрасно работает, а тремя равнозначными полями форма выглядела анкетой. -->
     <div class="field">
-      <label>Описание <span class="hint">— не обязательно</span></label>
+      <label>Описание <span class="hint">— необязательно</span></label>
       <textarea id="description" maxlength="1000">${escape(exercise?.description || '')}</textarea>
     </div>
 
-    <button class="btn" id="save">${exercise || !dayId ? 'Сохранить' : 'Создать и добавить в день'}</button>
+    <button class="btn" id="save">${exercise || !dayId ? 'Сохранить' : 'Создать и добавить'}</button>
     ${exercise ? '<button class="btn danger mt-2" id="remove">Удалить</button>' : ''}
   `);
 

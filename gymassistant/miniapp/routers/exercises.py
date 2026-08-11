@@ -1,6 +1,7 @@
 """Упражнения внутри тренировочного дня: добавить, настроить, переставить, убрать."""
 from fastapi import APIRouter, HTTPException
 
+from database.orm_extra import orm_reorder_exercises
 from database.orm_query import (
     move_exercise_down,
     move_exercise_up,
@@ -13,7 +14,7 @@ from database.orm_query import (
 from miniapp.db import Session
 from miniapp.deps import CurrentUser
 from miniapp.ownership import own_day, own_exercise, own_user_exercise
-from miniapp.schemas import DayExerciseIn, DayExercisesIn, ExercisePatchIn
+from miniapp.schemas import DayExerciseIn, DayExercisesIn, ExercisePatchIn, OrderIn
 from miniapp.serializers import exercise_json
 
 router = APIRouter(prefix="/api", tags=["exercises"])
@@ -76,6 +77,23 @@ async def add_exercises(day_id: int, body: DayExercisesIn, user: CurrentUser, se
 
     for item in body.items:
         await _append_to_day(session, user.user_id, day_id, item)
+
+    return await day_exercises(session, day_id)
+
+
+@router.patch("/days/{day_id}/exercises/order")
+async def reorder_exercises(day_id: int, body: OrderIn, user: CurrentUser, session: Session):
+    """
+    Весь порядок упражнений дня разом — под перетаскивание.
+
+    Одно движение пальца задаёт сразу конечный порядок, а не серию обменов
+    соседями: слать его пошагово значило бы N запросов и N промежуточных состояний,
+    каждое из которых сервер записал бы как настоящую программу.
+    """
+    await own_day(session, user.user_id, day_id)
+
+    if not await orm_reorder_exercises(session, day_id, body.ids):
+        raise HTTPException(400, "порядок должен содержать все упражнения дня ровно по разу")
 
     return await day_exercises(session, day_id)
 

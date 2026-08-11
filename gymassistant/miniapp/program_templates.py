@@ -40,7 +40,7 @@ TEMPLATES: tuple[ProgramTemplate, ...] = (
     ProgramTemplate(
         id="fullbody3",
         name="Всё тело, 3 дня",
-        subtitle="Каждая тренировка — на всё тело. С этого стоит начинать",
+        subtitle="Каждая тренировка на всё тело",
         days={
             "Понедельник": (
                 "Приседания со штангой",
@@ -65,7 +65,7 @@ TEMPLATES: tuple[ProgramTemplate, ...] = (
     ProgramTemplate(
         id="ppl3",
         name="Жим / тяга / ноги",
-        subtitle="Три дня: толкающие, тянущие, ноги. Классический сплит",
+        subtitle="Толкающие, тянущие, ноги",
         days={
             "Понедельник": (
                 "Жим штанги лёжа",
@@ -93,7 +93,7 @@ TEMPLATES: tuple[ProgramTemplate, ...] = (
     ProgramTemplate(
         id="upperlower4",
         name="Верх / низ, 4 дня",
-        subtitle="Больше объёма на группу. Когда трёх дней уже мало",
+        subtitle="Больше объёма на каждую группу",
         days={
             "Понедельник": (
                 "Жим штанги лёжа",

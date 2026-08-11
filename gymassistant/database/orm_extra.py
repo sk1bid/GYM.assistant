@@ -494,3 +494,30 @@ async def orm_get_exercises_of_days(session: AsyncSession, day_ids) -> dict[int,
         grouped.setdefault(exercise.training_day_id, []).append(exercise)
 
     return grouped
+
+
+async def orm_reorder_exercises(session: AsyncSession, day_id: int, ids: list[int]) -> bool:
+    """
+    Раскладывает упражнения дня в присланном порядке.
+
+    Нужно взамен пошаговых move_up/move_down: перетаскивание задаёт сразу весь
+    порядок, и слать его обменами соседей значило бы N запросов на одно движение
+    пальца — да ещё и с промежуточными состояниями, каждое из которых сервер считал
+    бы настоящей программой.
+
+    Список обязан совпадать с днём ПОЛНОСТЬЮ, а не быть его частью: неполный порядок
+    оставил бы часть упражнений с прежними позициями, и они перемешались бы
+    с новыми. Не совпал — не трогаем ничего, порядок здесь определяет структуру
+    тренировки (подряд идущие круговые собираются в один круг).
+    """
+    stmt = select(Exercise).where(Exercise.training_day_id == day_id)
+    exercises = {e.id: e for e in (await session.execute(stmt)).scalars()}
+
+    if set(ids) != set(exercises) or len(ids) != len(exercises):
+        return False
+
+    for position, exercise_id in enumerate(ids):
+        exercises[exercise_id].position = position
+
+    await session.commit()
+    return True

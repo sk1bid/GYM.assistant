@@ -69,7 +69,7 @@ export async function createProgram() {
 
   const form = sheet(`
     <h2>Новая программа</h2>
-    <p class="hint">Возьмите готовую и поправьте под себя — или соберите свою.</p>
+    <p class="hint">Готовую можно править как свою.</p>
 
     ${templates.map((template) => `
       <button class="list-item" data-template="${template.id}">
@@ -77,7 +77,8 @@ export async function createProgram() {
           <span class="title">${escape(template.name)}</span><br>
           <span class="sub">${escape(template.subtitle)}</span><br>
           <span class="sub num">${plural(template.days, 'день', 'дня', 'дней')} ·
-            ${escape(template.preview.map((d) => d.exercises.length).join(' + '))} упражнений</span>
+            ${plural(template.preview.reduce((n, d) => n + d.exercises.length, 0),
+              'упражнение', 'упражнения', 'упражнений')}</span>
         </span>
         <span class="chev">›</span>
       </button>
@@ -86,8 +87,8 @@ export async function createProgram() {
     <div class="section-title">Или с нуля</div>
     <button class="list-item" data-template="">
       <span class="grow">
-        <span class="title">Пустая программа</span><br>
-        <span class="sub">Семь дней недели, упражнения добавите сами</span>
+        <span class="title">Пустая</span><br>
+        <span class="sub">Собрать самому</span>
       </span>
       <span class="chev">›</span>
     </button>
@@ -105,20 +106,17 @@ export async function createProgram() {
 /** Второй шаг: название. У готовой программы оно уже подставлено. */
 function nameProgram(templateId, template) {
   const form = sheet(`
-    <h2>Как назовём?</h2>
+    <h2>Название</h2>
 
     <div class="field">
-      <label>Название</label>
       <input type="text" id="name" maxlength="50" placeholder="Например: Силовая, 3 дня"
              value="${escape(template?.name || '')}">
     </div>
 
     ${template ? `
-      <p class="hint">${escape(template.preview.map((d) => d.day_of_week).join(' · '))} —
-      остальные дни останутся выходными. Всё это потом правится.</p>
+      <p class="hint">${escape(template.preview.map((d) => d.day_of_week).join(' · '))}</p>
     ` : `
-      <p class="hint">Создадутся все семь дней недели — заполните те, в которые
-      тренируетесь. Программа сразу станет активной.</p>
+      <p class="hint">Семь дней недели, пустых. Программа сразу станет активной.</p>
     `}
 
     <button class="btn mt-4" id="save">Создать</button>
@@ -152,9 +150,8 @@ export async function programScreen({ id }) {
          список из семи одинаковых строк «отдых» выглядит готовым, а не пустым. -->
     ${filled ? '' : `
       <div class="empty">
-        <p>Ни один день ещё не заполнен.</p>
-        <p class="hint">Откройте день недели, в который тренируетесь, и добавьте
-        упражнения. Незаполненные дни — просто выходные.</p>
+        <p>Дни пока пустые.</p>
+        <p class="hint">Откройте тот, в который тренируетесь. Остальные — выходные.</p>
       </div>
     `}
 
@@ -165,7 +162,7 @@ export async function programScreen({ id }) {
           <span class="sub${day.exercises.length ? '' : ' quiet'}">
             ${day.exercises.length
               ? escape(day.exercises.map((e) => e.name).join(', '))
-              : 'выходной · добавить упражнения'}
+              : 'выходной'}
           </span>
         </span>
         <span class="chev">›</span>

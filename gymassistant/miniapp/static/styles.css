@@ -776,9 +776,52 @@ label {
   padding-left: var(--sp-3); margin: var(--sp-2) 0;
   background: var(--surface-container-low); border-radius: 0 var(--shape-md) var(--shape-md) 0;
 }
+/*
+  Шапка блока — кнопка: кругов в ней не «сколько упражнений» (их и так видно
+  по строкам), а сколько РАЗ этот круг проходить. Число тут же и правится, чтобы
+  за ним не ходить в настройки программы.
+*/
 .circuit-head {
+  display: block; width: 100%; text-align: left;
+  background: transparent; padding: var(--sp-2) 0 var(--sp-1);
   font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase;
-  color: var(--primary); padding: var(--sp-2) 0 0;
+  color: var(--primary);
+}
+.circuit-head:active { opacity: .6; }
+
+/*
+  Перетаскивание за ручку.
+
+  Тащим только за неё: жест по всей строке спорил бы с прокруткой страницы, и его
+  пришлось бы отделять длинным нажатием — то есть каждое перетаскивание начиналось
+  бы с паузы. touch-action: none нужен, чтобы браузер не забрал жест себе под скролл.
+*/
+.ex-list { position: relative; }
+
+.handle {
+  flex: 0 0 36px; height: 36px; touch-action: none; cursor: grab;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--outline);
+}
+
+.ex-row.dragging {
+  position: relative; z-index: 20;
+  background: var(--surface-container-high); border-radius: var(--shape-md);
+  box-shadow: 0 8px 24px rgb(0 0 0 / .18);
+}
+.ex-row.dragging .handle { cursor: grabbing; }
+
+/* Пока тащим — гасим выделение текста, иначе палец «красит» названия. */
+body.reordering { user-select: none; -webkit-user-select: none; }
+
+/*
+  Место высадки — линия, а не расступающиеся строки: строки лежат в разных
+  контейнерах (круговой блок оборачивает свои), и раздвигать их пришлось бы
+  с оглядкой на высоту шапки блока. Линия от вёрстки не зависит вовсе.
+*/
+.drop-line {
+  position: absolute; left: 0; right: 0; height: 2px;
+  background: var(--primary); border-radius: 1px; pointer-events: none;
 }
 
 /* Подходы прямо в строке дня: их правят чаще всего остального. */

@@ -73,6 +73,11 @@ class DayExercisesIn(BaseModel):
     items: list[DayExerciseIn] = Field(min_length=1, max_length=30)
 
 
+class OrderIn(BaseModel):
+    """Порядок упражнений дня целиком — все id ровно по разу, проверяет ORM."""
+    ids: list[int] = Field(min_length=1, max_length=60)
+
+
 class ExercisePatchIn(BaseModel):
     sets: int | None = Field(default=None, ge=1, le=20)
     reps: int | None = Field(default=None, ge=1, le=100)
