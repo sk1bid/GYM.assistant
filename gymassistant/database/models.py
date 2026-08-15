@@ -3,7 +3,7 @@ from typing import List
 
 from sqlalchemy import (
     String, Float, DateTime, func, Integer, ForeignKey, Text,
-    BigInteger, Index, CheckConstraint, Boolean
+    BigInteger, Index, CheckConstraint, Boolean, UniqueConstraint
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import (
@@ -279,6 +279,67 @@ class TrainingSession(Base):
         cascade='all, delete-orphan',
         lazy='select'
     )
+
+
+class HealthMetric(Base):
+    """
+    Метрика Apple Health: вес, пульс покоя, HRV, шаги, сон.
+
+    Данные приходят с телефона в отдельный стек (hae-server + MongoDB) и
+    переносятся сюда синхронизатором (scripts/sync_health.py). Приложение их пока
+    не читает: таблица нужна, чтобы здоровье и тренировки лежали в ОДНОЙ базе и
+    их можно было сопоставить одним SQL — Grafana к MongoDB не ходит, а join
+    между двумя базами не сделать.
+
+    Формат длинный: строка — это одно число одной метрики в один момент. У пульса
+    документ даёт три строки (min/avg/max), у сна четыре, у шагов одну; почему
+    так — см. services/health_sync.py.
+    """
+    __tablename__ = 'health_metric'
+    __table_args__ = (
+        # Ключ идемпотентности, ради которого всё и затевалось: Health Auto Export
+        # шлёт перекрывающиеся окна и один и тот же день приезжает много раз.
+        # С этим ограничением повторная присылка — апсерт, без него каждая
+        # синхронизация плодила бы дубли.
+        #
+        # `source` в ключе обязателен: шаги за один день приходят и с телефона,
+        # и с часов (19 июня — 3270 и 5200). Без источника они затирали бы друг
+        # друга, и в базе оставался бы тот, кто пришёл последним.
+        UniqueConstraint(
+            'user_id', 'name', 'field', 'measured_at', 'source',
+            name='uq_health_metric'
+        ),
+        Index('idx_health_metric_lookup', 'user_id', 'name', 'measured_at'),
+    )
+
+    # bigint на Postgres, но INTEGER на SQLite: автоинкремент там умеет только
+    # INTEGER PRIMARY KEY, а на BIGINT ключ молча остаётся NULL. Тесты гоняются
+    # на SQLite, прод живёт на Postgres — нужен и тот, и другой.
+    id: Mapped[int] = mapped_column(
+        BigInteger().with_variant(Integer, "sqlite"), primary_key=True, autoincrement=True
+    )
+    user_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey('user.user_id', ondelete='CASCADE'), nullable=False
+    )
+
+    # Имя метрики как её зовёт Apple Health: step_count, weight_body_mass,
+    # heart_rate_variability. Не перечисляем списком: метрик под сотню, и они
+    # добавляются по мере того, как человек включает их в выгрузке.
+    name: Mapped[str] = mapped_column(String(64), nullable=False)
+    # Какое именно число документа: qty у простых, min/avg/max у пульса,
+    # deep/rem/core/awake у сна.
+    field: Mapped[str] = mapped_column(String(32), nullable=False)
+
+    measured_at: Mapped[DateTime] = mapped_column(DateTime, nullable=False)
+    value: Mapped[float] = mapped_column(Float(), nullable=False)
+    units: Mapped[str] = mapped_column(String(32), nullable=True)
+    # Устройство: iPhone, Apple Watch. Хранится не для красоты — складывать
+    # источники нельзя, один и тот же день посчитан каждым из них отдельно.
+    #
+    # НЕ nullable: колонка входит в ключ уникальности, а NULL в ключе не
+    # склеивается сам с собой — документ без устройства дублировался бы при
+    # каждой синхронизации. Неизвестный источник — пустая строка.
+    source: Mapped[str] = mapped_column(String(64), nullable=False, server_default='')
 
 
 class RestTimer(Base):

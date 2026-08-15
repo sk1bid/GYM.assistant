@@ -1,0 +1,58 @@
+# Перенос метрик Apple Health из hae-server в наш Postgres.
+#
+# Здоровье приезжает с телефона в отдельный стек (namespace health-export:
+# hae-server + MongoDB), тренировки лежат в Postgres. Смотреть их вместе было
+# неоткуда — Grafana к MongoDB нативно не ходит, а join между двумя базами
+# не сделать. Job переносит метрики к тренировкам раз в сутки.
+#
+# Ходит ВНУТРЬ КЛАСТЕРА, а не через sk1bid.ru: публичный путь лежит через
+# nginx и TLS без единой причины — обе стороны стоят на одной ноде. Заодно
+# не зависим от того, что там настроено снаружи.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: gym-health-sync
+spec:
+  # 21:00 UTC — 04:00 по местному времени телефона (+07:00). Ночью, потому что
+  # синхронизация тянет всю историю каждой метрики и незачем делать это в часы,
+  # когда человек открывает приложение.
+  schedule: "0 21 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  # Пропущенный запуск (нода была выключена) навёрстывать не нужно: следующий
+  # прогон и так тянет всю историю, дыры не остаётся.
+  startingDeadlineSeconds: 3600
+  jobTemplate:
+    spec:
+      # Повтор имеет смысл: в отличие от миграций, здесь причиной падения бывает
+      # именно невезение — hae-server перезапускался, сеть моргнула.
+      backoffLimit: 2
+      ttlSecondsAfterFinished: 86400
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: sync
+              image: ghcr.io/sk1bid/gymassistant:bot-prod
+              imagePullPolicy: IfNotPresent
+              command: ["python", "-m", "scripts.sync_health"]
+              env:
+                - name: DB_URL
+                  valueFrom: { secretKeyRef: { name: bot-secrets, key: DB_URL } }
+                # Токен чтения hae-server. Секреты не ходят между неймспейсами,
+                # поэтому в gym-prod лежит своя копия (см. README ниже).
+                - name: HAE_READ_TOKEN
+                  valueFrom: { secretKeyRef: { name: hae-read, key: READ_TOKEN } }
+                - name: HAE_BASE_URL
+                  value: "http://hae-server.health-export.svc.cluster.local:3001"
+                # Чьё это здоровье. Метрики приходят с одного телефона и в базе
+                # бота принадлежат одному пользователю — связать их автоматически
+                # неоткуда, Apple Health о Telegram не знает.
+                - name: HEALTH_USER_ID
+                  value: "851690283"
+              resources:
+                requests: { memory: "96Mi", cpu: "50m" }
+                limits: { memory: "384Mi" }
+          imagePullSecrets:
+            - name: ghcr-auth

@@ -171,6 +171,13 @@ jobs:
             sed "s|:miniapp-prod$|:miniapp-$TAG|" gymassistant/k8s/miniapp-prod.yaml \
               | kubectl apply -n $NAMESPACE -f -
 
+            # Перенос метрик Apple Health. Тег подставляется по той же причине,
+            # что и выше: с плавающим :bot-prod и IfNotPresent ночной запуск взял
+            # бы закэшированный узлом слой, а не тот код, что только что собрали.
+            # Ждать нечего — CronJob ничего не выкатывает, он просто расписание.
+            sed "s|:bot-prod$|:bot-$TAG|" gymassistant/k8s/health-sync-cronjob.yaml \
+              | kubectl apply -n $NAMESPACE -f -
+
             # Bounded waits, and the pod's own log on failure — a bare timeout says
             # nothing about the reason.
             for DEPLOY in gym-bot gym-miniapp; do
