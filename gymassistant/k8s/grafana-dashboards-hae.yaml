@@ -1,0 +1,1318 @@
+# Готовые дашборды проекта health-auto-export-server (HealthyApps), как есть.
+#
+# Свои писать незачем: апстрим их поддерживает, и они ходят прямо в REST API
+# hae-server через плагин Infinity — без нашей таблицы и без синхронизатора.
+# Наш дашборд (grafana-dashboard-gym.yaml) их не дублирует, а закрывает то,
+# чего они не могут: связь здоровья с ТРЕНИРОВКАМИ, которые лежат в Postgres.
+#
+# Два дашборда зашивают uid источника (bee4k1otx5urkf), поэтому Infinity
+# заводится ровно с этим uid — иначе панели пришлось бы править руками.
+# У третьего uid был подстановкой __inputs (так Grafana экспортирует «для
+# импорта»); подставлен тот же, а блок __inputs убран — при провижининге
+# файлом спрашивать некого.
+#
+# ВНИМАНИЕ: дашборды про тренировки (Workouts) будут пустыми, пока в приложении
+# не заведена ОТДЕЛЬНАЯ автоматизация с Data Type: Workouts — коллекция workouts
+# в Mongo сейчас пуста.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboards-hae
+  namespace: monitoring
+data:
+  health-metrics.json: |
+    {
+      "annotations": {
+        "list": [
+          {
+            "builtIn": 1,
+            "datasource": {
+              "type": "grafana",
+              "uid": "-- Grafana --"
+            },
+            "enable": true,
+            "hide": true,
+            "iconColor": "rgba(0, 211, 255, 1)",
+            "name": "Annotations & Alerts",
+            "type": "dashboard"
+          }
+        ]
+      },
+      "editable": true,
+      "fiscalYearStartMonth": 0,
+      "graphTooltip": 0,
+      "id": 5,
+      "links": [],
+      "panels": [
+        {
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "bee4k1otx5urkf"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "fixedColor": "blue",
+                "mode": "shades"
+              },
+              "custom": {
+                "axisBorderShow": false,
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "fillOpacity": 80,
+                "gradientMode": "hue",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "lineWidth": 1,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "red",
+                    "value": 80
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 0
+          },
+          "id": 3,
+          "options": {
+            "barRadius": 0,
+            "barWidth": 0.97,
+            "fullHighlight": false,
+            "groupWidth": 0.7,
+            "legend": {
+              "calcs": [],
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "orientation": "auto",
+            "showValue": "auto",
+            "stacking": "none",
+            "tooltip": {
+              "hideZeros": false,
+              "mode": "single",
+              "sort": "none"
+            },
+            "xTickLabelRotation": 0,
+            "xTickLabelSpacing": 0
+          },
+          "pluginVersion": "11.5.1",
+          "targets": [
+            {
+              "columns": [
+                {
+                  "selector": "date",
+                  "text": "Date",
+                  "type": "timestamp"
+                },
+                {
+                  "selector": "awake",
+                  "text": "Awake",
+                  "type": "number"
+                },
+                {
+                  "selector": "asleep",
+                  "text": "Asleep",
+                  "type": "number"
+                },
+                {
+                  "selector": "core",
+                  "text": "Core",
+                  "type": "number"
+                },
+                {
+                  "selector": "rem",
+                  "text": "REM",
+                  "type": "number"
+                },
+                {
+                  "selector": "deep",
+                  "text": "Deep",
+                  "type": "number"
+                }
+              ],
+              "datasource": {
+                "type": "yesoreyeram-infinity-datasource",
+                "uid": "bee4k1otx5urkf"
+              },
+              "filters": [],
+              "format": "table",
+              "global_query_id": "",
+              "refId": "A",
+              "root_selector": "",
+              "source": "url",
+              "type": "json",
+              "url": "/api/metrics/sleep_analysis?from=${__from}&to=${__to}",
+              "url_options": {
+                "data": "",
+                "method": "GET"
+              }
+            }
+          ],
+          "title": "Sleep Analysis",
+          "type": "barchart"
+        },
+        {
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "bee4k1otx5urkf"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "continuous-YlRd"
+              },
+              "custom": {
+                "axisBorderShow": false,
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "barWidthFactor": 0.6,
+                "drawStyle": "line",
+                "fillOpacity": 0,
+                "gradientMode": "scheme",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "insertNulls": false,
+                "lineInterpolation": "linear",
+                "lineStyle": {
+                  "fill": "solid"
+                },
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "auto",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "red",
+                    "value": 80
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 0
+          },
+          "id": 2,
+          "options": {
+            "candleStyle": "candles",
+            "colorStrategy": "open-close",
+            "colors": {
+              "down": "red",
+              "up": "red"
+            },
+            "fields": {
+              "close": "Max",
+              "high": "Max",
+              "low": "Min",
+              "open": "Min"
+            },
+            "includeAllFields": false,
+            "legend": {
+              "calcs": [],
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "mode": "candles+volume",
+            "tooltip": {
+              "hideZeros": false,
+              "mode": "single",
+              "sort": "none"
+            }
+          },
+          "pluginVersion": "11.5.1",
+          "targets": [
+            {
+              "columns": [
+                {
+                  "selector": "date",
+                  "text": "Timestamp",
+                  "type": "timestamp"
+                },
+                {
+                  "selector": "Min",
+                  "text": "Min",
+                  "type": "number"
+                },
+                {
+                  "selector": "Avg",
+                  "text": "Avg",
+                  "type": "number"
+                },
+                {
+                  "selector": "Max",
+                  "text": "Max",
+                  "type": "number"
+                },
+                {
+                  "selector": "units",
+                  "text": "Units",
+                  "type": "string"
+                },
+                {
+                  "selector": "source",
+                  "text": "Source",
+                  "type": "string"
+                }
+              ],
+              "datasource": {
+                "type": "yesoreyeram-infinity-datasource",
+                "uid": "bee4k1otx5urkf"
+              },
+              "filters": [],
+              "format": "table",
+              "global_query_id": "",
+              "refId": "A",
+              "root_selector": "",
+              "source": "url",
+              "type": "json",
+              "url": "/api/metrics/heart_rate?from=${__from}&to=${__to}",
+              "url_options": {
+                "data": "",
+                "method": "GET"
+              }
+            }
+          ],
+          "title": "Heart Rate",
+          "type": "candlestick"
+        },
+        {
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "bee4k1otx5urkf"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "continuous-GrYlRd",
+                "seriesBy": "min"
+              },
+              "custom": {
+                "axisBorderShow": false,
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "barWidthFactor": 0.6,
+                "drawStyle": "line",
+                "fillOpacity": 0,
+                "gradientMode": "scheme",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "insertNulls": false,
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "auto",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "#EAB839",
+                    "value": 400
+                  },
+                  {
+                    "color": "orange",
+                    "value": 600
+                  },
+                  {
+                    "color": "red",
+                    "value": 800
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 8
+          },
+          "id": 1,
+          "options": {
+            "legend": {
+              "calcs": [],
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "hideZeros": false,
+              "mode": "single",
+              "sort": "none"
+            }
+          },
+          "pluginVersion": "11.5.1",
+          "targets": [
+            {
+              "columns": [
+                {
+                  "selector": "date",
+                  "text": "Timestamp",
+                  "type": "timestamp"
+                },
+                {
+                  "selector": "qty",
+                  "text": "Value",
+                  "type": "number"
+                },
+                {
+                  "selector": "units",
+                  "text": "Units",
+                  "type": "string"
+                },
+                {
+                  "selector": "source",
+                  "text": "Source",
+                  "type": "string"
+                }
+              ],
+              "datasource": {
+                "type": "yesoreyeram-infinity-datasource",
+                "uid": "bee4k1otx5urkf"
+              },
+              "filters": [],
+              "format": "table",
+              "global_query_id": "",
+              "refId": "Active Energy",
+              "root_selector": "",
+              "source": "url",
+              "type": "json",
+              "url": "/api/metrics/active_energy?from=${__from}&to=${__to}",
+              "url_options": {
+                "data": "",
+                "method": "GET"
+              }
+            }
+          ],
+          "title": "Active Energy",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "bee4k1otx5urkf"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "fixedColor": "blue",
+                "mode": "shades",
+                "seriesBy": "min"
+              },
+              "custom": {
+                "axisBorderShow": false,
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "barWidthFactor": 0.6,
+                "drawStyle": "bars",
+                "fillOpacity": 0,
+                "gradientMode": "hue",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "insertNulls": false,
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "auto",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 8
+          },
+          "id": 6,
+          "options": {
+            "legend": {
+              "calcs": [],
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "hideZeros": false,
+              "mode": "single",
+              "sort": "none"
+            }
+          },
+          "pluginVersion": "11.5.1",
+          "targets": [
+            {
+              "columns": [
+                {
+                  "selector": "date",
+                  "text": "Timestamp",
+                  "type": "timestamp"
+                },
+                {
+                  "selector": "qty",
+                  "text": "Value",
+                  "type": "number"
+                },
+                {
+                  "selector": "units",
+                  "text": "Units",
+                  "type": "string"
+                },
+                {
+                  "selector": "source",
+                  "text": "Source",
+                  "type": "string"
+                }
+              ],
+              "datasource": {
+                "type": "yesoreyeram-infinity-datasource",
+                "uid": "bee4k1otx5urkf"
+              },
+              "filters": [],
+              "format": "table",
+              "global_query_id": "",
+              "refId": "Step Count",
+              "root_selector": "",
+              "source": "url",
+              "type": "json",
+              "url": "/api/metrics/step_count?from=${__from}&to=${__to}",
+              "url_options": {
+                "data": "",
+                "method": "GET"
+              }
+            }
+          ],
+          "title": "Step Count",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "bee4k1otx5urkf"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "continuous-RdYlGr",
+                "seriesBy": "min"
+              },
+              "custom": {
+                "axisBorderShow": false,
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "barWidthFactor": 0.6,
+                "drawStyle": "bars",
+                "fillOpacity": 0,
+                "gradientMode": "hue",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "insertNulls": false,
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "auto",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "#EAB839",
+                    "value": 400
+                  },
+                  {
+                    "color": "orange",
+                    "value": 600
+                  },
+                  {
+                    "color": "red",
+                    "value": 800
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 16
+          },
+          "id": 5,
+          "options": {
+            "legend": {
+              "calcs": [],
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "hideZeros": false,
+              "mode": "single",
+              "sort": "none"
+            }
+          },
+          "pluginVersion": "11.5.1",
+          "targets": [
+            {
+              "columns": [
+                {
+                  "selector": "date",
+                  "text": "Timestamp",
+                  "type": "timestamp"
+                },
+                {
+                  "selector": "qty",
+                  "text": "Value",
+                  "type": "number"
+                },
+                {
+                  "selector": "units",
+                  "text": "Units",
+                  "type": "string"
+                },
+                {
+                  "selector": "source",
+                  "text": "Source",
+                  "type": "string"
+                }
+              ],
+              "datasource": {
+                "type": "yesoreyeram-infinity-datasource",
+                "uid": "bee4k1otx5urkf"
+              },
+              "filters": [],
+              "format": "table",
+              "global_query_id": "",
+              "refId": "Cycling Distance",
+              "root_selector": "",
+              "source": "url",
+              "type": "json",
+              "url": "/api/metrics/cycling_distance?from=${__from}&to=${__to}",
+              "url_options": {
+                "data": "",
+                "method": "GET"
+              }
+            }
+          ],
+          "title": "Cycling Distance",
+          "type": "timeseries"
+        }
+      ],
+      "preload": false,
+      "refresh": "",
+      "schemaVersion": 40,
+      "tags": [],
+      "templating": {
+        "list": []
+      },
+      "time": {
+        "from": "now-30d",
+        "to": "now"
+      },
+      "timepicker": {},
+      "timezone": "browser",
+      "title": "Health Metrics",
+      "uid": "dee1dgpz9tam8f",
+      "version": 22,
+      "weekStart": ""
+    }
+  workout-details.json: |
+    {
+      "annotations": {
+        "list": [
+          {
+            "builtIn": 1,
+            "datasource": {
+              "type": "grafana",
+              "uid": "-- Grafana --"
+            },
+            "enable": true,
+            "hide": true,
+            "iconColor": "rgba(0, 211, 255, 1)",
+            "name": "Annotations & Alerts",
+            "type": "dashboard"
+          }
+        ]
+      },
+      "editable": true,
+      "fiscalYearStartMonth": 0,
+      "graphTooltip": 0,
+      "id": 3,
+      "links": [],
+      "panels": [
+        {
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "bee4k1otx5urkf"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "thresholds"
+              },
+              "custom": {
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                }
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "red",
+                    "value": 80
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 0
+          },
+          "id": 2,
+          "options": {
+            "basemap": {
+              "config": {
+                "showLabels": true,
+                "theme": "auto"
+              },
+              "name": "Layer 0",
+              "type": "default"
+            },
+            "controls": {
+              "mouseWheelZoom": true,
+              "showAttribution": true,
+              "showDebug": false,
+              "showMeasure": false,
+              "showScale": false,
+              "showZoom": true
+            },
+            "layers": [
+              {
+                "config": {
+                  "arrow": 0,
+                  "style": {
+                    "color": {
+                      "fixed": "green"
+                    },
+                    "lineWidth": 2,
+                    "opacity": 1,
+                    "rotation": {
+                      "fixed": 0,
+                      "max": 360,
+                      "min": -360,
+                      "mode": "mod"
+                    },
+                    "size": {
+                      "fixed": 5,
+                      "max": 15,
+                      "min": 2
+                    },
+                    "symbol": {
+                      "field": "",
+                      "fixed": "",
+                      "mode": "fixed"
+                    },
+                    "symbolAlign": {
+                      "horizontal": "center",
+                      "vertical": "center"
+                    },
+                    "textConfig": {
+                      "fontSize": 12,
+                      "offsetX": 0,
+                      "offsetY": 0,
+                      "textAlign": "center",
+                      "textBaseline": "middle"
+                    }
+                  }
+                },
+                "filterData": {
+                  "id": "byRefId",
+                  "options": "Workout Route"
+                },
+                "location": {
+                  "latitude": "Latitude",
+                  "longitude": "Longitude",
+                  "mode": "coords"
+                },
+                "name": "Route",
+                "opacity": 0.4,
+                "tooltip": true,
+                "type": "route"
+              }
+            ],
+            "tooltip": {
+              "mode": "details"
+            },
+            "view": {
+              "allLayers": false,
+              "id": "fit",
+              "lastOnly": false,
+              "lat": 0,
+              "layer": "Route",
+              "lon": 0,
+              "padding": 1,
+              "zoom": 15
+            }
+          },
+          "pluginVersion": "11.5.1",
+          "targets": [
+            {
+              "columns": [
+                {
+                  "selector": "latitude",
+                  "text": "Latitude",
+                  "type": "number"
+                },
+                {
+                  "selector": "longitude",
+                  "text": "Longitude",
+                  "type": "number"
+                },
+                {
+                  "selector": "time",
+                  "text": "Timestamp",
+                  "type": "timestamp"
+                }
+              ],
+              "datasource": {
+                "type": "yesoreyeram-infinity-datasource",
+                "uid": "bee4k1otx5urkf"
+              },
+              "filters": [],
+              "format": "table",
+              "global_query_id": "",
+              "parser": "backend",
+              "refId": "Workout Route",
+              "root_selector": "route",
+              "source": "url",
+              "type": "json",
+              "url": "/api/workouts/${selected_workout}",
+              "url_options": {
+                "data": "",
+                "method": "GET"
+              }
+            }
+          ],
+          "title": "Workout Route",
+          "type": "geomap"
+        },
+        {
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "bee4k1otx5urkf"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "continuous-GrYlRd",
+                "seriesBy": "last"
+              },
+              "custom": {
+                "axisBorderShow": false,
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "barWidthFactor": 0.6,
+                "drawStyle": "line",
+                "fillOpacity": 0,
+                "gradientMode": "scheme",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "insertNulls": false,
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "auto",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "#6ED0E0",
+                    "value": 0
+                  },
+                  {
+                    "color": "blue",
+                    "value": 40
+                  },
+                  {
+                    "color": "green",
+                    "value": 100
+                  },
+                  {
+                    "color": "#EAB839",
+                    "value": 120
+                  },
+                  {
+                    "color": "red",
+                    "value": 135
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 8
+          },
+          "id": 1,
+          "options": {
+            "legend": {
+              "calcs": [],
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "hideZeros": false,
+              "mode": "single",
+              "sort": "none"
+            }
+          },
+          "pluginVersion": "11.5.1",
+          "targets": [
+            {
+              "columns": [
+                {
+                  "selector": "timestamp",
+                  "text": "Time",
+                  "type": "timestamp"
+                },
+                {
+                  "selector": "value",
+                  "text": "Heart Rate",
+                  "type": "number"
+                }
+              ],
+              "datasource": {
+                "type": "yesoreyeram-infinity-datasource",
+                "uid": "bee4k1otx5urkf"
+              },
+              "filters": [],
+              "format": "timeseries",
+              "global_query_id": "",
+              "parser": "backend",
+              "refId": "Heart Rate",
+              "root_selector": "heartRateData",
+              "source": "url",
+              "type": "json",
+              "url": "/api/workouts/${selected_workout}",
+              "url_options": {
+                "data": "",
+                "method": "GET"
+              }
+            }
+          ],
+          "title": "Heart Rate",
+          "type": "timeseries"
+        }
+      ],
+      "preload": false,
+      "refresh": "",
+      "schemaVersion": 40,
+      "tags": [],
+      "templating": {
+        "list": [
+          {
+            "allowCustomValue": false,
+            "current": {
+              "text": "9F0C477C-51B9-4F14-8FC6-109DBE455F7D",
+              "value": "9F0C477C-51B9-4F14-8FC6-109DBE455F7D"
+            },
+            "datasource": {
+              "type": "yesoreyeram-infinity-datasource",
+              "uid": "bee4k1otx5urkf"
+            },
+            "definition": "",
+            "label": "Selected Workout",
+            "name": "selected_workout",
+            "options": [],
+            "query": {
+              "infinityQuery": {
+                "columns": [
+                  {
+                    "selector": "id",
+                    "text": "ID",
+                    "type": "string"
+                  }
+                ],
+                "filters": [],
+                "format": "table",
+                "parser": "backend",
+                "refId": "variable",
+                "root_selector": "",
+                "source": "url",
+                "type": "json",
+                "url": "/api/workouts",
+                "url_options": {
+                  "data": "",
+                  "method": "GET"
+                }
+              },
+              "query": "",
+              "queryType": "infinity"
+            },
+            "refresh": 1,
+            "regex": "",
+            "type": "query"
+          }
+        ]
+      },
+      "time": {
+        "from": "2025-02-25T17:46:33.000Z",
+        "to": "2025-02-25T18:22:58.000Z"
+      },
+      "timepicker": {},
+      "timezone": "browser",
+      "title": "Workout Details",
+      "uid": "eedjdc3i47klcb",
+      "version": 22,
+      "weekStart": ""
+    }
+  workouts-table.json: |
+    {
+      "__elements": {},
+      "annotations": {
+        "list": [
+          {
+            "builtIn": 1,
+            "datasource": {
+              "type": "grafana",
+              "uid": "-- Grafana --"
+            },
+            "enable": true,
+            "hide": true,
+            "iconColor": "rgba(0, 211, 255, 1)",
+            "name": "Annotations & Alerts",
+            "type": "dashboard"
+          }
+        ]
+      },
+      "editable": true,
+      "fiscalYearStartMonth": 0,
+      "graphTooltip": 0,
+      "id": null,
+      "links": [],
+      "panels": [
+        {
+          "datasource": {
+            "type": "yesoreyeram-infinity-datasource",
+            "uid": "bee4k1otx5urkf"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "thresholds"
+              },
+              "custom": {
+                "align": "auto",
+                "cellOptions": {
+                  "type": "auto"
+                },
+                "inspect": false
+              },
+              "links": [],
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "red",
+                    "value": 80
+                  }
+                ]
+              }
+            },
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "ID"
+                },
+                "properties": [
+                  {
+                    "id": "links",
+                    "value": [
+                      {
+                        "title": "Set Selected Workout",
+                        "url": "/d/eedjdc3i47klcb/workout-details?var-selected_workout=${__data.fields[0]}&from=${__data.fields.Start}&to=${__data.fields.End}﻿"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          "gridPos": {
+            "h": 40,
+            "w": 21,
+            "x": 0,
+            "y": 0
+          },
+          "id": 1,
+          "options": {
+            "cellHeight": "sm",
+            "footer": {
+              "countRows": false,
+              "fields": "",
+              "reducer": [
+                "sum"
+              ],
+              "show": false
+            },
+            "showHeader": true
+          },
+          "pluginVersion": "11.5.1",
+          "targets": [
+            {
+              "columns": [
+                {
+                  "selector": "id",
+                  "text": "ID",
+                  "type": "string"
+                },
+                {
+                  "selector": "workout_type",
+                  "text": "Workout Type",
+                  "type": "string"
+                },
+                {
+                  "selector": "start_time",
+                  "text": "Start",
+                  "type": "timestamp"
+                },
+                {
+                  "selector": "end_time",
+                  "text": "End",
+                  "type": "timestamp"
+                },
+                {
+                  "selector": "duration_minutes",
+                  "text": "Duration",
+                  "type": "number"
+                },
+                {
+                  "selector": "calories_burned",
+                  "text": "Active Energy",
+                  "type": "number"
+                }
+              ],
+              "datasource": {
+                "type": "yesoreyeram-infinity-datasource",
+                "uid": "bee4k1otx5urkf"
+              },
+              "filters": [],
+              "format": "table",
+              "global_query_id": "",
+              "parser": "simple",
+              "refId": "Workouts",
+              "root_selector": "",
+              "source": "url",
+              "type": "json",
+              "url": "/api/workouts?startDate=${__from}&endDate=${__to}",
+              "url_options": {
+                "data": "",
+                "headers": [],
+                "method": "GET",
+                "params": [
+                  {
+                    "key": "to",
+                    "value": "${__to:date}"
+                  },
+                  {
+                    "key": "from",
+                    "value": "${__from:date}"
+                  }
+                ]
+              }
+            }
+          ],
+          "title": "Workouts",
+          "type": "table"
+        }
+      ],
+      "refresh": "",
+      "schemaVersion": 40,
+      "tags": [],
+      "templating": {
+        "list": []
+      },
+      "time": {
+        "from": "now-2y",
+        "to": "now"
+      },
+      "timepicker": {},
+      "timezone": "browser",
+      "title": "Workouts Table",
+      "uid": "eeddiaujdhc00c",
+      "version": 37,
+      "weekStart": ""
+    }

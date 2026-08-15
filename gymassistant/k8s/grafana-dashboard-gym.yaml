@@ -1,0 +1,203 @@
+# Дашборд «Тренировки и здоровье»: то, ради чего метрики Apple Health
+# переносились из MongoDB в Postgres рядом с тренировками.
+#
+# Лежит ConfigMap'ом, а не рисуется руками в интерфейсе: под Grafana может
+# переехать, а PVC у неё один и восстанавливать панели по памяти — занятие
+# на вечер. Провайдер подхватывает всё из /etc/grafana/dashboards.
+#
+# Панели только те, которых НЕ МОЖЕТ быть у апстрима (grafana-dashboards-hae.yaml):
+# он ходит в REST API hae-server и про тренировки не знает вовсе. Шаги и сон
+# рисует он — держать здесь свои копии значило бы разойтись с ним при первом же
+# его обновлении.
+#
+# ЛОВУШКА ДАННЫХ, которая тут обойдена явно: гранулярность метрики непостоянна.
+# До 8 августа 2026 приезжали суточные итоги, после — поминутные записи. Поэтому
+# пульс покоя и HRV агрегируются по дате явно (avg за сутки), а не рисуются
+# «как есть»: иначе график менял бы плотность точек на ровном месте.
+#
+# Вторая ловушка — что источники нельзя складывать (один день считают и телефон,
+# и часы: 19 июня 3270 против 5200 шагов) — здесь не всплывает: вес, пульс покоя
+# и HRV приходят с одного устройства. Она ждёт всякого, кто добавит сюда шаги
+# или энергию.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-gym
+  namespace: monitoring
+data:
+  gym.json: |
+    {
+      "uid": "gym-health",
+      "title": "Тренировки и здоровье",
+      "tags": [
+        "gym"
+      ],
+      "timezone": "browser",
+      "schemaVersion": 39,
+      "version": 1,
+      "refresh": "",
+      "time": {
+        "from": "now-1y",
+        "to": "now"
+      },
+      "panels": [
+        {
+          "type": "barchart",
+          "title": "Объём тренировок по неделям",
+          "description": "Тоннаж — сумма вес × повторения. Пропущенные подходы не в счёт: человек их не поднял.",
+          "datasource": {
+            "type": "postgres",
+            "uid": "gym-postgres"
+          },
+          "gridPos": {
+            "h": 9,
+            "w": 24,
+            "x": 0,
+            "y": 0
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "kg",
+              "custom": {
+                "fillOpacity": 80
+              }
+            },
+            "overrides": []
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "postgres",
+                "uid": "gym-postgres"
+              },
+              "format": "time_series",
+              "rawQuery": true,
+              "rawSql": "SELECT date_trunc('week', ts.date) AS time, sum(s.weight * s.repetitions) AS \"тоннаж\" FROM training_session ts JOIN \"set\" s ON s.training_session_id = ts.id WHERE NOT s.skipped AND $__timeFilter(ts.date) GROUP BY 1 ORDER BY 1"
+            }
+          ]
+        },
+        {
+          "type": "timeseries",
+          "title": "Вес тела",
+          "description": "Замеры редкие — человек встаёт на весы не каждый день, поэтому точки соединены линией.",
+          "datasource": {
+            "type": "postgres",
+            "uid": "gym-postgres"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 9
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "kg",
+              "custom": {
+                "spanNulls": true,
+                "showPoints": "always"
+              }
+            },
+            "overrides": []
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "postgres",
+                "uid": "gym-postgres"
+              },
+              "format": "time_series",
+              "rawQuery": true,
+              "rawSql": "SELECT measured_at AS time, value AS \"вес\" FROM health_metric WHERE name = 'weight_body_mass' AND $__timeFilter(measured_at) ORDER BY 1"
+            }
+          ]
+        },
+        {
+          "type": "timeseries",
+          "title": "Пульс покоя и HRV",
+          "description": "Сигнал восстановления: пульс покоя вверх и HRV вниз обычно означают, что организм ещё не отдохнул.",
+          "datasource": {
+            "type": "postgres",
+            "uid": "gym-postgres"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 9
+          },
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "spanNulls": true
+              }
+            },
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "HRV, мс"
+                },
+                "properties": [
+                  {
+                    "id": "custom.axisPlacement",
+                    "value": "right"
+                  }
+                ]
+              }
+            ]
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "postgres",
+                "uid": "gym-postgres"
+              },
+              "format": "time_series",
+              "rawQuery": true,
+              "rawSql": "SELECT date_trunc('day', measured_at) AS time, avg(value) AS \"пульс покоя\" FROM health_metric WHERE name = 'resting_heart_rate' AND $__timeFilter(measured_at) GROUP BY 1 ORDER BY 1"
+            },
+            {
+              "refId": "B",
+              "datasource": {
+                "type": "postgres",
+                "uid": "gym-postgres"
+              },
+              "format": "time_series",
+              "rawQuery": true,
+              "rawSql": "SELECT date_trunc('day', measured_at) AS time, avg(value) AS \"HRV, мс\" FROM health_metric WHERE name = 'heart_rate_variability' AND $__timeFilter(measured_at) GROUP BY 1 ORDER BY 1"
+            }
+          ]
+        },
+        {
+          "type": "table",
+          "title": "Неделя: тренировки против здоровья",
+          "description": "Тот самый join, ради которого метрики переехали в Postgres. FULL JOIN, потому что неделя может быть с тренировками и без замеров, и наоборот.",
+          "datasource": {
+            "type": "postgres",
+            "uid": "gym-postgres"
+          },
+          "gridPos": {
+            "h": 10,
+            "w": 24,
+            "x": 0,
+            "y": 18
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "postgres",
+                "uid": "gym-postgres"
+              },
+              "format": "table",
+              "rawQuery": true,
+              "rawSql": "WITH vol AS (SELECT date_trunc('week', ts.date) AS wk, count(DISTINCT ts.id) AS sessions, round(sum(s.weight * s.repetitions)::numeric) AS tonnage FROM training_session ts JOIN \"set\" s ON s.training_session_id = ts.id WHERE NOT s.skipped AND $__timeFilter(ts.date) GROUP BY 1), hp AS (SELECT date_trunc('week', measured_at) AS wk, round(avg(value) FILTER (WHERE name = 'weight_body_mass')::numeric, 1) AS weight_kg, round(avg(value) FILTER (WHERE name = 'resting_heart_rate')::numeric) AS rhr, round(avg(value) FILTER (WHERE name = 'heart_rate_variability')::numeric) AS hrv FROM health_metric WHERE $__timeFilter(measured_at) GROUP BY 1) SELECT to_char(coalesce(vol.wk, hp.wk), 'YYYY-MM-DD') AS \"неделя\", vol.sessions AS \"тренировок\", vol.tonnage AS \"тоннаж\", hp.weight_kg AS \"вес\", hp.rhr AS \"пульс покоя\", hp.hrv AS \"HRV\" FROM vol FULL JOIN hp USING (wk) ORDER BY 1 DESC"
+            }
+          ]
+        }
+      ]
+    }

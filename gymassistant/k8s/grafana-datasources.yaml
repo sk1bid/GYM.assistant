@@ -1,0 +1,64 @@
+# Источники данных Grafana.
+#
+# Prometheus остался от мониторинга Minecraft (сейчас его statefulset скейлнут
+# в ноль, поэтому источник неживой — но и не мешает).
+#
+# GYM — база бота: тренировки и перенесённые в неё метрики Apple Health
+# (см. k8s/health-sync-cronjob.yaml). Именно ради того, чтобы смотреть их
+# ОДНИМ запросом, метрики и переносились из MongoDB: к Mongo Grafana нативно
+# не ходит вовсе, а join между двумя базами не сделать.
+#
+# Пользователь grafana в Postgres заведён только с SELECT: дашборду незачем
+# уметь писать в базу, из которой человек тренируется. Пароль подставляется
+# из переменной окружения (секрет grafana-gym-db), а не лежит в ConfigMap —
+# ConfigMap читает кто угодно с доступом к неймспейсу.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-datasources
+  namespace: monitoring
+data:
+  datasources.yaml: |
+    apiVersion: 1
+    datasources:
+    - name: Prometheus
+      type: prometheus
+      access: proxy
+      url: http://prometheus-service.monitoring.svc.cluster.local:8080
+      isDefault: false
+      editable: true
+      uid: prometheus-v2
+    - name: GYM
+      type: postgres
+      access: proxy
+      url: postgres-nodeport.gym-prod.svc.cluster.local:5432
+      database: gymassistant
+      user: grafana
+      isDefault: true
+      editable: true
+      uid: gym-postgres
+      jsonData:
+        sslmode: disable
+        postgresVersion: 1600
+      secureJsonData:
+        password: ${GYM_DB_PASSWORD}
+    # Источник готовых дашбордов проекта health-auto-export-server: они ходят
+    # прямо в REST API hae-server, минуя и Mongo, и нашу таблицу.
+    #
+    # uid зашит НЕ случайным: два дашборда апстрима ссылаются именно на
+    # bee4k1otx5urkf, и с другим uid панели пришлось бы переписывать руками.
+    #
+    # Адрес внутрикластерный: обе стороны на одной ноде, и гонять запросы
+    # через sk1bid.ru с TLS незачем.
+    - name: Health Auto Export
+      type: yesoreyeram-infinity-datasource
+      access: proxy
+      url: http://hae-server.health-export.svc.cluster.local:3001
+      isDefault: false
+      editable: true
+      uid: bee4k1otx5urkf
+      jsonData:
+        auth_method: none
+        httpHeaderName1: api-key
+      secureJsonData:
+        httpHeaderValue1: ${HAE_READ_TOKEN}
