@@ -46,7 +46,7 @@ data:
           "title": "Объём тренировок по неделям",
           "description": "Тоннаж — сумма вес × повторения. Пропущенные подходы не в счёт: человек их не поднял.",
           "datasource": {
-            "type": "postgres",
+            "type": "grafana-postgresql-datasource",
             "uid": "gym-postgres"
           },
           "gridPos": {
@@ -68,7 +68,7 @@ data:
             {
               "refId": "A",
               "datasource": {
-                "type": "postgres",
+                "type": "grafana-postgresql-datasource",
                 "uid": "gym-postgres"
               },
               "format": "time_series",
@@ -82,7 +82,7 @@ data:
           "title": "Вес тела",
           "description": "Замеры редкие — человек встаёт на весы не каждый день, поэтому точки соединены линией.",
           "datasource": {
-            "type": "postgres",
+            "type": "grafana-postgresql-datasource",
             "uid": "gym-postgres"
           },
           "gridPos": {
@@ -105,7 +105,7 @@ data:
             {
               "refId": "A",
               "datasource": {
-                "type": "postgres",
+                "type": "grafana-postgresql-datasource",
                 "uid": "gym-postgres"
               },
               "format": "time_series",
@@ -119,7 +119,7 @@ data:
           "title": "Пульс покоя и HRV",
           "description": "Сигнал восстановления: пульс покоя вверх и HRV вниз обычно означают, что организм ещё не отдохнул.",
           "datasource": {
-            "type": "postgres",
+            "type": "grafana-postgresql-datasource",
             "uid": "gym-postgres"
           },
           "gridPos": {
@@ -153,7 +153,7 @@ data:
             {
               "refId": "A",
               "datasource": {
-                "type": "postgres",
+                "type": "grafana-postgresql-datasource",
                 "uid": "gym-postgres"
               },
               "format": "time_series",
@@ -163,7 +163,7 @@ data:
             {
               "refId": "B",
               "datasource": {
-                "type": "postgres",
+                "type": "grafana-postgresql-datasource",
                 "uid": "gym-postgres"
               },
               "format": "time_series",
@@ -177,7 +177,7 @@ data:
           "title": "Неделя: тренировки против здоровья",
           "description": "Тот самый join, ради которого метрики переехали в Postgres. FULL JOIN, потому что неделя может быть с тренировками и без замеров, и наоборот.",
           "datasource": {
-            "type": "postgres",
+            "type": "grafana-postgresql-datasource",
             "uid": "gym-postgres"
           },
           "gridPos": {
@@ -190,7 +190,7 @@ data:
             {
               "refId": "A",
               "datasource": {
-                "type": "postgres",
+                "type": "grafana-postgresql-datasource",
                 "uid": "gym-postgres"
               },
               "format": "table",

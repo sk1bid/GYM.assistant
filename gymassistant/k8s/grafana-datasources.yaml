@@ -29,7 +29,11 @@ data:
       editable: true
       uid: prometheus-v2
     - name: GYM
-      type: postgres
+      # Именно grafana-postgresql-datasource, а не postgres. Короткое имя
+      # осталось в plugin.json лишь как aliasIDs, и провижининг его НЕ разрешает:
+      # источник тихо не создаётся, без единой строки в логе, а панели падают
+      # с «datasource not found», не дойдя до запроса.
+      type: grafana-postgresql-datasource
       access: proxy
       url: postgres-nodeport.gym-prod.svc.cluster.local:5432
       database: gymassistant
