@@ -46,17 +46,20 @@ async def orm_add_banner_description(session: AsyncSession, data: dict):
     await session.commit()
 
 
-async def orm_change_banner_image(session: AsyncSession, name: str, image: str):
+async def orm_change_banner_image(session: AsyncSession, name: str, image: str) -> int:
     """
-    Изменяет изображение для определенной страницы
-    :param session:
-    :param name: имя страницы/уровня
-    :param image:
-    :return:
+    Изменяет изображение для определенной страницы. Возвращает число строк.
+
+    Ноль означает, что баннера с таким именем в базе нет, — и это НЕ мелочь:
+    именно так пряталась опечатка в имени файла (`errror.png` при строке `error`).
+    UPDATE молча менял ноль строк, `file_id` не сохранялся, и картинка
+    перезаливалась админу при каждом старте бота. Зовущий обязан посмотреть
+    на результат.
     """
     query = update(Banner).where(Banner.name == name).values(image=image)
-    await session.execute(query)
+    result = await session.execute(query)
     await session.commit()
+    return result.rowcount
 
 
 async def orm_get_banner(session: AsyncSession, page: str):

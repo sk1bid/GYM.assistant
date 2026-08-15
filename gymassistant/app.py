@@ -61,11 +61,13 @@ async def on_startup(bot: Bot):
     if run_param:
         await drop_db()
     await create_db()
-    async with session_maker() as session:
-        globals.error_pic = await orm_get_banner(session, "error")
-        
+    # Сначала заливка, потом чтение: иначе в тот самый запуск, когда картинка
+    # наконец попадёт в базу, error_pic останется пустым до перезапуска.
     async with session_maker() as session:
         await load_banners_from_folder(bot, session)
+
+    async with session_maker() as session:
+        globals.error_pic = await orm_get_banner(session, "error")
     await bot.set_webhook(
         url=WEBHOOK_URL,
         secret_token=WEBHOOK_SECRET,
@@ -174,9 +176,12 @@ async def main():
 async def on_startup_polling(bot: Bot):
     logging.info("Бот запускается (polling)...")
     await create_db()
+    # Порядок важен: заливка может ВПЕРВЫЕ добыть file_id для error.png, и читать
+    # баннер надо после неё, иначе картинка ошибки останется пустой до следующего
+    # запуска.
     async with session_maker() as session:
-        globals.error_pic = await orm_get_banner(session, "error")
         await load_banners_from_folder(bot, session)
+        globals.error_pic = await orm_get_banner(session, "error")
 
     await start_rest_notifier(bot)
     with contextlib.suppress(Exception):
@@ -186,9 +191,15 @@ async def on_startup_polling(bot: Bot):
     global _ready
     _ready = True
 
-    for user in bot.my_admins_list:
-        with contextlib.suppress(Exception):
-            await bot.send_message(user, "Бот запущен в режиме POLLING")
+    # Молчим по умолчанию. Сообщение писалось на КАЖДЫЙ старт процесса, а в
+    # кластере под перезапускается на каждую выкатку — за один день их бывает
+    # четыре. «Бот запущен» при этом не отвечает ни на один вопрос, который
+    # нельзя закрыть иначе: живость видит readinessProbe через /healthz,
+    # а результат выкатки — лог CI. Кому нужно, включает переменной.
+    if os.getenv("NOTIFY_ADMINS_ON_START", "False").lower() == "true":
+        for user in bot.my_admins_list:
+            with contextlib.suppress(Exception):
+                await bot.send_message(user, "Бот запущен в режиме POLLING")
 
 
 async def start_rest_notifier(bot: Bot):
