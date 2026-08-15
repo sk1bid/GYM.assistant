@@ -4,9 +4,10 @@
 Границы здесь не косметические: вес 10^9 кг или ноль повторений навсегда испортят
 и графики, а починить это потом можно только руками в SQL.
 """
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from miniapp.config import MAX_PROGRAM_NAME, MAX_USER_NAME
+from services.equipment import EQUIPMENT, OTHER
 
 
 class StartTrainingIn(BaseModel):
@@ -82,12 +83,25 @@ class ExercisePatchIn(BaseModel):
     sets: int | None = Field(default=None, ge=1, le=20)
     reps: int | None = Field(default=None, ge=1, le=100)
     circle_training: bool | None = None
+    # Шаг кнопок веса в этом зале. Ноль — «как у снаряда»: None здесь уже занят
+    # значением «поле не прислали», а сбросить переопределение чем-то надо.
+    weight_step: float | None = Field(default=None, ge=0, le=50)
 
 
 class UserExerciseIn(BaseModel):
     name: str = Field(min_length=1, max_length=150)
     description: str = Field(default="", max_length=1000)
     category_id: int
+    # Снаряд решает, каким шагом ходят кнопки веса и нужен ли вес вообще.
+    # Не прислали — 'other', то есть шаг штанги: не знаем — не выдумываем.
+    equipment: str = Field(default=OTHER, max_length=16)
+
+    @field_validator("equipment")
+    @classmethod
+    def known_equipment(cls, value: str) -> str:
+        if value not in EQUIPMENT:
+            raise ValueError(f"неизвестный снаряд: {value}")
+        return value
 
 
 class ProfileIn(BaseModel):

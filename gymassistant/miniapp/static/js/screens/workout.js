@@ -60,7 +60,7 @@ function drawEntry() {
   const exercise = current.exercise;
   const previous = previousSet();
 
-  const startWeight = previous?.weight ?? 20;
+  const startWeight = startingWeight(previous);
   const startReps = previous?.reps ?? exercise.reps;
 
   render(`
@@ -71,8 +71,13 @@ function drawEntry() {
 
     ${setTable()}
 
-    ${stepper('weight', 'вес, кг', weight(startWeight), 2.5, 'decimal')}
-    <div class="delta" id="weight-delta"></div>
+    ${showsWeight() ? `
+      ${blocks()
+        ? stepper('weight', 'блоки', toBlocks(startWeight), 1, 'numeric')
+        : stepper('weight', bodyweight() ? 'доп. вес, кг' : 'вес, кг',
+                  weight(startWeight), step(), 'decimal')}
+      <div class="delta" id="weight-delta"></div>
+    ` : '<button class="btn quiet mt-3" id="belt">+ отягощение</button>'}
 
     ${stepper('reps', 'повторения', startReps, 1, 'numeric')}
     <div class="delta" id="reps-delta"></div>
@@ -87,11 +92,159 @@ function drawEntry() {
   bindSteppers();
   bindSetRows();
 
+  on('#belt', 'click', () => {
+    beltOn = exercise.id;
+    draw();
+  });
   on('#skip', 'click', skip);
   on('#finish', 'click', finish);
 
   mainButton('Записать подход', submitSet);
   redrawDeltas();
+}
+
+/** Шаг кнопок веса, когда сервер его не назвал. Столько ходит штанга. */
+const DEFAULT_STEP = 2.5;
+
+/** Снаряды, у которых поведение экрана особое. Значения приходят с сервера. */
+const BODYWEIGHT = 'bodyweight';
+const STACK = 'stack';
+
+/**
+ * Пояс надет: показываем поле веса на упражнении со своим весом.
+ *
+ * Живёт вне state, потому что это не факт тренировки, а решение про текущий экран.
+ * Помечено id упражнения: круговой блок перекидывает между тремя снарядами, и
+ * пояс, надетый на подтягиваниях, не должен всплывать на планке.
+ */
+let beltOn = null;
+
+/**
+ * Свой вес: подтягивания, брусья, планка.
+ *
+ * Спрашиваем про СНАРЯД, а не про то, пришло ли число шага. Разница не
+ * теоретическая: первая версия читала `step != null`, то есть считала своим весом
+ * и поле, которого в ответе нет вовсе. А это ровно рассинхрон версий — статика
+ * монтируется с диска и обновляется сразу, Python приезжает только с рестартом
+ * пода, — и на эти полминуты жим гантелей превращался в упражнение без веса,
+ * записывая подходы с нулём. Молча испортить запись хуже, чем показать лишнее
+ * поле, поэтому всё неизвестное трактуем в сторону веса.
+ */
+function bodyweight() {
+  return state.current?.exercise?.equipment === BODYWEIGHT;
+}
+
+/**
+ * Блок: нагрузка считается БЛОКАМИ, а не килограммами.
+ *
+ * У станка человек не набирает вес — он втыкает пин в нужный блок и знает именно
+ * его номер. У разных станков блоки разные, поэтому шаг в килограммах здесь
+ * неправильная единица в принципе: любое число верно для одного зала и мимо для
+ * соседнего. Кнопки ходят по одному блоку, а килограммы считаются из его веса
+ * и нужны только объёму, рекордам и графикам. Ошибка в весе блока их
+ * пропорционально сдвинет, но количество блоков — то, что человек воспроизводит
+ * в зале, — останется точным, а вес блока правится в шторке дня.
+ */
+function blocks() {
+  return state.current?.exercise?.equipment === STACK;
+}
+
+/** Сколько весит один блок. */
+function blockWeight() {
+  return step();
+}
+
+/** Килограммы с сервера → сколько блоков показать. */
+function toBlocks(kg) {
+  return Math.max(0, Math.round((Number(kg) || 0) / blockWeight()));
+}
+
+/** Блоки с экрана → килограммы в базу. */
+function toKg(count) {
+  return Math.round(Math.max(0, count) * blockWeight() * 100) / 100;
+}
+
+/** Сколько блоков словами: «1 блок», «2 блока», «7 блоков». */
+function blocksWord(count) {
+  return plural(count, 'блок', 'блока', 'блоков');
+}
+
+/**
+ * Показывать ли поле веса.
+ *
+ * Свой вес — это не «веса не бывает», а «вес необязателен»: подтягивания и брусья
+ * сплошь и рядом делают с блином на поясе. Первая версия убирала поле совсем,
+ * и записать такой подход было нечем.
+ *
+ * Поэтому поле не спрятано, а свёрнуто, и разворачивается само, как только видно,
+ * что человек им пользуется: в прошлый раз вес был — значит пояс его обычное
+ * состояние, и просить открывать поле каждую тренировку незачем.
+ */
+function showsWeight() {
+  if (!bodyweight()) return true;
+
+  const id = state.current?.exercise?.id;
+  if (beltOn === id) return true;
+
+  // Уже записанное в этой тренировке — чтобы закрытое и открытое заново приложение
+  // не сворачивало поле обратно посреди упражнения: `beltOn` живёт только в памяти
+  // вкладки, а подходы лежат на сервере.
+  if (state.sets.some((s) => s.exercise_id === id && s.weight > 0)) return true;
+
+  return (state.current?.exercise?.prev || []).some((s) => s.weight > 0);
+}
+
+/** Шаг кнопок «−/+» под весом. Старый сервер шага не присылает — берём штангу. */
+function step() {
+  return state.current?.exercise?.step ?? DEFAULT_STEP;
+}
+
+/**
+ * С какого веса открывается поле.
+ *
+ * Три источника, в порядке убывания правоты:
+ *
+ * 1. **Что уже сделано сегодня** — второй подход идёт с тем же весом, что первый.
+ *    Это сильнее любой подсказки: подсказка рассуждала о прошлой тренировке,
+ *    а сегодняшний вес человек уже поднял руками полминуты назад.
+ * 2. **Подсказка сервера** — двойная прогрессия по двум прошлым тренировкам
+ *    (services/progression.py). Она и есть «повысить / держать / понизить»:
+ *    отдельной кнопки нет, потому что согласие должно стоить ноль действий,
+ *    а несогласие — одного тапа по «−».
+ * 3. **Прошлый раз**, если подсказки нет (упражнение делается впервые).
+ *
+ * На своём весе без пояса — ноль: подставлять туда 20 кг «как у штанги» было бы
+ * враньём.
+ */
+function startingWeight(previous) {
+  const today = state.sets.filter((s) => s.exercise_id === state.current.exercise.id && !s.skipped);
+  if (today.length) return today[today.length - 1].weight;
+
+  const hint = state.current.exercise.suggest;
+  if (hint) return hint.weight;
+
+  return previous?.weight ?? (bodyweight() ? 0 : 20);
+}
+
+/**
+ * Подход одной строкой.
+ *
+ * Читаем ВЕС САМОГО ПОДХОДА, а не настройку упражнения: подтягивания делают и
+ * с поясом, и без, в одной тренировке. Нулевой вес — это «просто подтянулся»,
+ * и «0 кг × 10» было бы не фактом, а следом от пустого поля.
+ *
+ * `unit` гасит «кг» в справочных строках («было 40 × 10»): там единица известна
+ * из соседней строки того же столбца, а место дорого.
+ */
+function setValue(kg, reps, unit = true) {
+  if (blocks()) {
+    const count = toBlocks(kg);
+    return `${unit ? blocksWord(count) : count} × ${reps}`;
+  }
+
+  const suffix = unit ? ' кг' : '';
+  if (!bodyweight()) return `${weight(kg)}${suffix} × ${reps}`;
+  return kg > 0 ? `+${weight(kg)}${suffix} × ${reps}` : plural(reps, 'раз', 'раза', 'раз');
 }
 
 /**
@@ -134,7 +287,7 @@ function setTable() {
                 data-set="${fact.id}" data-weight="${fact.weight}" data-reps="${fact.reps}">
           <span class="mark">${fact.skipped ? '—' : '✓'}</span>
           ${name}
-          <span class="v">${fact.skipped ? 'пропущен' : `${weight(fact.weight)} кг × ${fact.reps}`}</span>
+          <span class="v">${fact.skipped ? 'пропущен' : setValue(fact.weight, fact.reps)}</span>
         </button>
       `);
       continue;
@@ -149,7 +302,7 @@ function setTable() {
         ${name}
         ${now
           ? '<span class="pill on">сейчас</span>'
-          : `<span class="v was">${was ? `было ${weight(was.weight)} × ${was.reps}` : ''}</span>`}
+          : `<span class="v was">${was ? `было ${setValue(was.weight, was.reps, false)}` : ''}</span>`}
       </div>
     `);
   }
@@ -258,7 +411,10 @@ function position(current) {
  */
 function record(value, previous) {
   if (!value || value <= (previous?.weight ?? 0)) return '';
-  return `<div class="meta">рекорд <b>${weight(value)} кг</b></div>`;
+  // Рекорд хранится в килограммах, как и всё остальное, но показывать его надо
+  // в той единице, в которой человек его повторит.
+  const shown = blocks() ? blocksWord(toBlocks(value)) : `${weight(value)} кг`;
+  return `<div class="meta">рекорд <b>${shown}</b></div>`;
 }
 
 /**
@@ -412,12 +568,18 @@ function drawFinished() {
   const done = state.sets;
   const totalVolume = done.reduce((sum, s) => sum + s.weight * s.reps, 0);
 
+  // День целиком из своего веса (турник, брусья, пресс) даёт нулевой объём —
+  // «0 кг поднято» читалось бы поломкой, а не итогом. Тогда итог — повторения.
+  const headline = totalVolume > 0
+    ? [volume(totalVolume), 'поднято за сегодня']
+    : [done.reduce((sum, s) => sum + s.reps, 0), 'повторений за сегодня'];
+
   // Итог — это одно число, поэтому оно и набрано как заголовок, а не спрятано в строку.
   render(`
     <div class="overline flush center">тренировка отработана</div>
     <div class="card accent center mt-3">
-      <div class="display">${volume(totalVolume)}</div>
-      <div class="hint mt-1">поднято за сегодня</div>
+      <div class="display">${headline[0]}</div>
+      <div class="hint mt-1">${headline[1]}</div>
     </div>
     <p class="hint center">${plural(done.length, 'подход', 'подхода', 'подходов')}</p>
     <button class="btn mt-4" id="finish">Завершить</button>
@@ -470,8 +632,14 @@ function redrawDeltas() {
   const previous = previousSet();
   if (!previous) return;
 
-  delta('weight-delta', (parseFloat(document.getElementById('weight').value) || 0) - previous.weight,
-    (n) => `${weight(n)} кг`);
+  if (showsWeight()) {
+    // На блоке сравниваем блоки с блоками: «+1 блок» — то, что человек и сделает
+    // у станка, а «+5 кг» ему ещё пришлось бы делить в уме.
+    const was = blocks() ? toBlocks(previous.weight) : previous.weight;
+    const now = parseFloat(document.getElementById('weight').value) || 0;
+
+    delta('weight-delta', now - was, blocks() ? blocksWord : (n) => `${weight(n)} кг`);
+  }
 
   delta('reps-delta', (parseInt(document.getElementById('reps').value, 10) || 0) - previous.reps,
     (n) => plural(n, 'повторение', 'повторения', 'повторений'));
@@ -489,11 +657,16 @@ function delta(id, diff, format) {
 }
 
 async function submitSet() {
-  const weightValue = parseFloat(document.getElementById('weight').value);
+  // Пояс не надет — поля нет, и подход пишется нулевым весом: в объём и рекорды
+  // он не идёт, а план двигает наравне с остальными.
+  const entered = showsWeight() ? parseFloat(document.getElementById('weight').value) : 0;
+  // В базе всегда килограммы: на блоке набрали блоки — переводим здесь, чтобы
+  // объём, рекорды и графики жили в одной единице со всеми остальными снарядами.
+  const weightValue = blocks() ? toKg(entered) : entered;
   const repsValue = parseInt(document.getElementById('reps').value, 10);
 
   if (!(weightValue >= 0) || !(repsValue >= 1)) {
-    return alert('Проверьте вес и повторения');
+    return alert(showsWeight() ? 'Проверьте вес и повторения' : 'Проверьте повторения');
   }
 
   mainButtonProgress(true);
@@ -525,7 +698,9 @@ function bindSetRows() {
     // У пропущенного в базе нули — подставлять их в форму бессмысленно.
     // Берём то же, с чего начинается обычный ввод: прошлый раз или план.
     const previous = previousSet();
-    const currentWeight = wasSkipped ? (previous?.weight ?? 20) : Number(node.dataset.weight);
+    const currentWeight = wasSkipped
+      ? (previous?.weight ?? (bodyweight() ? 0 : 20))
+      : Number(node.dataset.weight);
     const currentReps = wasSkipped
       ? (previous?.reps ?? state.current?.exercise?.reps ?? 10)
       : Number(node.dataset.reps);
@@ -533,9 +708,16 @@ function bindSetRows() {
     const form = sheet(`
       <h2>${wasSkipped ? 'Всё-таки сделал' : 'Исправить подход'}</h2>
       ${wasSkipped ? '<p class="hint">Подход перестанет считаться пропущенным.</p>' : ''}
+      <!-- Поле веса здесь есть ВСЕГДА, даже на своём весе, где на вводе оно
+           свёрнуто. Правка — действие исправляющее, и самый частый её повод как раз
+           «забыл записать блин на поясе»; спрятать поле значило бы оставить это
+           без выхода. Пустой ноль на планке дешевле тупика на подтягиваниях. -->
       <div class="field">
-        <label>Вес, кг</label>
-        <input type="number" id="edit-weight" inputmode="decimal" step="2.5" value="${weight(currentWeight)}">
+        <label>${blocks() ? 'Блоки' : (bodyweight() ? 'Доп. вес, кг' : 'Вес, кг')}</label>
+        <input type="number" id="edit-weight"
+               inputmode="${blocks() ? 'numeric' : 'decimal'}"
+               step="${blocks() ? 1 : step()}"
+               value="${blocks() ? toBlocks(currentWeight) : weight(currentWeight)}">
       </div>
       <div class="field">
         <label>Повторения</label>
@@ -546,7 +728,8 @@ function bindSetRows() {
     `);
 
     form.node.querySelector('#save').onclick = async () => {
-      const newWeight = parseFloat(form.node.querySelector('#edit-weight').value);
+      const entered = parseFloat(form.node.querySelector('#edit-weight').value) || 0;
+      const newWeight = blocks() ? toKg(entered) : entered;
       const newReps = parseInt(form.node.querySelector('#edit-reps').value, 10);
 
       state = await api.training.editSet(id, newWeight, newReps);

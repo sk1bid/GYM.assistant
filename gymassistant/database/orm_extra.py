@@ -87,10 +87,16 @@ async def orm_get_prev_sets_by_identity(
     user_id: int,
     exercise: Exercise,
     current_session_id=None,
+    back: int = 1,
 ):
     """
     Подходы этого упражнения из последней тренировки, где оно вообще делалось
     (текущая сессия исключается). Именно это показывается как «прошлый раз».
+
+    `back=2` — позапрошлый раз. Нужен подсказке про вес: правило 2-for-2 повышает
+    только если план закрыт ДВЕ тренировки подряд, и по одной прошлой оно
+    не считается. Отдельной функцией это было бы копией всего запроса ради
+    одного OFFSET.
     """
     prev_session = (
         select(TrainingSession.id)
@@ -101,7 +107,13 @@ async def orm_get_prev_sets_by_identity(
     if current_session_id is not None:
         prev_session = prev_session.where(TrainingSession.id != current_session_id)
 
-    prev_session = prev_session.order_by(TrainingSession.date.desc()).limit(1).scalar_subquery()
+    prev_session = (
+        prev_session.group_by(TrainingSession.id, TrainingSession.date)
+        .order_by(TrainingSession.date.desc())
+        .limit(1)
+        .offset(max(0, back - 1))
+        .scalar_subquery()
+    )
 
     stmt = (
         select(Set)

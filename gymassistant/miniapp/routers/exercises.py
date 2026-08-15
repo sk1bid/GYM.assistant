@@ -46,6 +46,7 @@ async def _append_to_day(session: Session, user_id: int, day_id: int, item: DayE
             "name": catalog.name,
             "description": catalog.description,
             "circle_training": item.circle_training,
+            "equipment": catalog.equipment,
             **link,
         },
         day_id,

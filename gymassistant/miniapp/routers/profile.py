@@ -23,6 +23,7 @@ from miniapp.ownership import own_exercise, own_training_session
 from miniapp.routers.training import parse_session_id
 from miniapp.schemas import ProfileIn
 from services.clock import today_in
+from services.equipment import OTHER, weight_step
 
 router = APIRouter(prefix="/api", tags=["profile"])
 
@@ -93,6 +94,12 @@ async def history_detail(session_id: str, user: CurrentUser, session: Session):
             grouped[recorded.exercise_id] = {
                 "exercise_id": recorded.exercise_id,
                 "name": exercise.name if exercise else "удалённое упражнение",
+                # Снаряд нужен и здесь: подходы хранятся в килограммах, но на
+                # блоке человек считал блоками, и в истории он должен увидеть их
+                # же, иначе один и тот же подход выглядит на двух экранах
+                # по-разному.
+                "equipment": (exercise.equipment or OTHER) if exercise else OTHER,
+                "step": weight_step(exercise.equipment, exercise.weight_step) if exercise else None,
                 "sets": [],
             }
         grouped[recorded.exercise_id]["sets"].append({

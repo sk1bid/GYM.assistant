@@ -386,7 +386,29 @@ function editRounds(program, reload) {
 }
 
 
-/** Подходы и повторения — шторкой, не уходя с экрана дня. */
+/**
+ * Шаги, из которых собирается вес в реальном зале: полублин, мелкий блин,
+ * гантельный ряд, пара блинов по 1.25, средний блин, крупный блин.
+ */
+const WEIGHT_STEPS = [1, 1.25, 2, 2.5, 5, 10];
+
+/** Сколько весит один блок. У разных станков по-разному, отсюда и настройка. */
+const BLOCK_WEIGHTS = [2.5, 4.5, 5, 5.5, 7, 10];
+
+/**
+ * Список значений, в котором ТОЧНО есть текущее.
+ *
+ * Иначе не совпавшее ни с чем значение не выделялось бы, браузер показал бы первый
+ * пункт, и «Готово» молча переписало бы настройку на него — при том, что человек
+ * открывал шторку поправить повторения.
+ */
+function stepOptions(current, list) {
+  const value = Number(current);
+  if (!(value > 0) || list.includes(value)) return list;
+  return [...list, value].sort((a, b) => a - b);
+}
+
+/** Подходы, повторения и шаг веса — шторкой, не уходя с экрана дня. */
 function editSets(exercise, reload) {
   const form = sheet(`
     <h2>${escape(exercise.name)}</h2>
@@ -416,6 +438,24 @@ function editSets(exercise, reload) {
       </div>
     </div>
 
+    <!-- Настройка ЗАЛА, а не упражнения, и на блоке она про другое.
+         На блоке кнопки ходят по одному блоку, и число здесь — сколько он весит:
+         килограммы нужны только объёму и рекордам. У остальных снарядов это
+         просто шаг кнопок. Своего веса не касается: пояс грузят обычными блинами. -->
+    ${exercise.equipment === 'bodyweight' || exercise.step == null ? '' : `
+      <div class="field mt-4">
+        <label for="step">${exercise.equipment === 'stack' ? 'Вес блока' : 'Шаг кнопок веса'}</label>
+        <select id="step">
+          ${stepOptions(exercise.step, exercise.equipment === 'stack' ? BLOCK_WEIGHTS : WEIGHT_STEPS)
+            .map((value) => `
+              <option value="${value}" ${Number(exercise.step) === value ? 'selected' : ''}>
+                ${value} кг
+              </option>
+            `).join('')}
+        </select>
+      </div>
+    `}
+
     <button class="btn mt-4" id="save">Готово</button>
   `);
 
@@ -432,6 +472,8 @@ function editSets(exercise, reload) {
     await api.exercises.update(exercise.id, {
       sets: parseInt(field('sets').value, 10),
       reps: parseInt(field('reps').value, 10),
+      // Шага в шторке нет у своего веса — тогда и не трогаем.
+      ...(field('step') ? { weight_step: Number(field('step').value) } : {}),
     });
     form.close();
     haptic('success');

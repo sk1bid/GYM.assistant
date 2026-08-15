@@ -112,6 +112,7 @@ async def _fill_from_template(session: Session, program_id: int, template) -> No
                     "description": preset.description,
                     "circle_training": False,
                     "admin_exercise_id": preset.id,
+                    "equipment": preset.equipment,
                 },
                 day.id,
                 "admin",

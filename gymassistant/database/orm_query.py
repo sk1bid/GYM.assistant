@@ -13,6 +13,7 @@ from database.models import (
     ExerciseCategory,
     UserExercises, TrainingSession
 )
+from services.equipment import OTHER
 
 async def _one(session: AsyncSession, stmt):
     res = await session.execute(stmt)
@@ -250,7 +251,9 @@ async def orm_add_exercise(session: AsyncSession, data: dict, training_day_id: i
         position=max_position + 1,
         admin_exercise_id=admin_exercise_id,
         user_exercise_id=user_exercise_id,
-        circle_training=data.get('circle_training', False)
+        circle_training=data.get('circle_training', False),
+        # Снимок с карточки каталога — как name и description строкой выше.
+        equipment=data.get('equipment'),
     )
 
     session.add(obj)
@@ -339,6 +342,9 @@ async def orm_update_exercise(session: AsyncSession, exercise_id: int, data: dic
         update_data['training_day_id'] = data['training_day_id']
     if 'circle_training' in data:
         update_data['circle_training'] = data['circle_training']
+    if 'weight_step' in data:
+        # Ноль приходит вместо NULL — так клиент сбрасывает шаг обратно на снаряд.
+        update_data['weight_step'] = data['weight_step'] or None
 
     # Управление типом упражнения при обновлении
     if 'exercise_type' in data:
@@ -714,13 +720,14 @@ async def orm_add_admin_exercise(session: AsyncSession, data: dict):
     """
     Добавляем предустановленное упражнение
     :param session:
-    :param data: название упражнения, описание, id категории
+    :param data: название упражнения, описание, id категории, снаряд
     :return:
     """
     obj = AdminExercises(
         name=data['name'],
         description=data['description'],
         category_id=int(data["category"]),
+        equipment=data.get('equipment', OTHER),
     )
     session.add(obj)
     await session.commit()
@@ -807,7 +814,7 @@ async def orm_add_user_exercise(session: AsyncSession, data: dict):
     """
     Добавляем пользовательское упражнение
     :param session:
-    :param data: Название упражнения, описание, Telegram ID, ID категории
+    :param data: Название упражнения, описание, Telegram ID, ID категории, снаряд
     :return:
     """
     obj = UserExercises(
@@ -815,6 +822,7 @@ async def orm_add_user_exercise(session: AsyncSession, data: dict):
         description=data['description'],
         user_id=int(data["user_id"]),
         category_id=int(data["category_id"]),
+        equipment=data.get('equipment', OTHER),
     )
     session.add(obj)
     await session.commit()
@@ -864,7 +872,7 @@ async def orm_update_user_exercise(session: AsyncSession, user_exercise_id: int,
     Обновляем информацию о пользовательском упражнении
     :param session:
     :param user_exercise_id:
-    :param data: Название упражнения, описание, ID категории
+    :param data: Название упражнения, описание, ID категории, снаряд
     :return:
     """
     query = (
@@ -873,10 +881,21 @@ async def orm_update_user_exercise(session: AsyncSession, user_exercise_id: int,
         .values(
             name=data['name'],
             description=data['description'],
-            category_id=int(data["category"])
+            category_id=int(data["category"]),
+            equipment=data.get('equipment', OTHER),
         )
     )
     await session.execute(query)
+
+    # Снаряд, в отличие от названия и описания, догоняет уже разложенные по дням
+    # копии. Названием пользователь подписывает упражнение, и старая подпись в старой
+    # программе — его дело; снаряд же читает интерфейс, и ровно за этим его и правят:
+    # «у меня это блок, а кнопки ходят по 2.5».
+    await session.execute(
+        update(Exercise)
+        .where(Exercise.user_exercise_id == user_exercise_id)
+        .values(equipment=data.get('equipment', OTHER))
+    )
     await session.commit()
 
 

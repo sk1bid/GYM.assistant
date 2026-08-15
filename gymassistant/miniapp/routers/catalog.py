@@ -15,6 +15,7 @@ from miniapp.db import Session
 from miniapp.deps import CurrentUser
 from miniapp.ownership import own_user_exercise
 from miniapp.schemas import UserExerciseIn
+from services.equipment import TITLES
 
 router = APIRouter(prefix="/api", tags=["catalog"])
 
@@ -40,6 +41,9 @@ async def categories(user: CurrentUser, session: Session):
         "exercises": (
             [_flat(e, "admin") for e in presets] + [_flat(e, "user") for e in mine]
         ),
+        # Список снарядов для формы своего упражнения. Едет отсюда, а не зашит
+        # в клиенте: значения проверяет схема на входе, и разъехаться им нельзя.
+        "equipment": [{"id": key, "title": title} for key, title in TITLES.items()],
     }
 
 
@@ -49,6 +53,7 @@ def _flat(exercise, kind: str) -> dict:
         "name": exercise.name,
         "description": exercise.description,
         "category_id": exercise.category_id,
+        "equipment": exercise.equipment,
         "kind": kind,
     }
 
@@ -72,10 +77,7 @@ async def list_user_exercises(user: CurrentUser, session: Session):
     items = await orm_get_user_exercises(session, user.user_id)
     return {
         "ok": True,
-        "exercises": [
-            {"id": e.id, "name": e.name, "description": e.description, "category_id": e.category_id}
-            for e in items
-        ],
+        "exercises": [_flat(e, "user") for e in items],
     }
 
 
@@ -86,6 +88,7 @@ async def create_user_exercise(body: UserExerciseIn, user: CurrentUser, session:
         "description": body.description.strip(),
         "user_id": user.user_id,
         "category_id": body.category_id,
+        "equipment": body.equipment,
     })
 
     # Отдаём созданное обратно, потому что своё упражнение почти всегда заводят
@@ -107,6 +110,7 @@ async def update_user_exercise(
         "name": body.name.strip(),
         "description": body.description.strip(),
         "category": body.category_id,
+        "equipment": body.equipment,
     })
     return {"ok": True}
 

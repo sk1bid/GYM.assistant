@@ -1472,3 +1472,315 @@ async def test_the_day_carries_the_rounds_of_its_program(client: httpx.AsyncClie
 
     await client.patch(f"/api/programs/{program['id']}", json={"circular_rounds": 5})
     assert (await client.get(f"/api/day/{day['id']}")).json()["program"]["circular_rounds"] == 5
+
+
+# ---------------------------------------------------------------- снаряд и шаг веса
+
+
+async def _day_with_preset(client: httpx.AsyncClient, name: str, program_name: str) -> dict:
+    """Программа → первый день → одно упражнение каталога по названию."""
+    program = (await client.post("/api/programs", json={"name": program_name})).json()["program"]
+    day = (await client.get(f"/api/programs/{program['id']}/days")).json()["days"][0]
+
+    preset = next(
+        e for e in (await client.get("/api/catalog")).json()["exercises"] if e["name"] == name
+    )
+    added = (await client.post(f"/api/days/{day['id']}/exercises", json={
+        "admin_exercise_id": preset["id"], "circle_training": False,
+    })).json()["exercises"]
+
+    return {"program": program, "day": day, "exercise": added[-1]}
+
+
+@pytest.mark.anyio
+async def test_the_step_of_the_weight_comes_from_the_equipment(client: httpx.AsyncClient):
+    """
+    Шаг кнопок «−/+» задаёт снаряд, а не константа 2.5 на всё подряд.
+
+    На блоке вес набирается только блоками целиком; на ряду гантелей
+    шаг 2, и 2.5 промахивается мимо каждой второй. Раньше шаг был зашит в клиенте
+    одним числом, поэтому кнопки предлагали то, чего в зале нет.
+    """
+    expected = {
+        "Жим штанги лёжа": ("barbell", 2.5),
+        "Махи гантелями в стороны": ("dumbbell", 2.0),
+        "Тяга верхнего блока": ("stack", 5.0),      # вес блока, а не шаг в кг
+        "Жим ногами": ("machine", 2.5),
+    }
+
+    for name, (equipment, step) in expected.items():
+        built = await _day_with_preset(client, name, f"Шаг {name}")
+        assert built["exercise"]["equipment"] == equipment, name
+        assert built["exercise"]["step"] == step, name
+
+        # И на экране подхода тоже: клиент читает снаряд оттуда же.
+        state = (await client.post("/api/training/start", json={
+            "training_day_id": built["day"]["id"],
+        })).json()
+        assert state["current"]["exercise"]["equipment"] == equipment, name
+        assert state["current"]["exercise"]["step"] == step, name
+
+
+@pytest.mark.anyio
+async def test_bodyweight_still_allows_the_belt(client: httpx.AsyncClient):
+    """
+    Свой вес — это «вес необязателен», а НЕ «веса не бывает».
+
+    Подтягивания и брусья сплошь и рядом делают с блином на поясе. Первая версия
+    убирала поле веса совсем — и записать такой подход было нечем. Поэтому снаряд
+    остаётся признаком «поле свёрнуто», а шаг приезжает числом: пояс грузят
+    обычными блинами, и кнопкам есть чем ходить.
+
+    Решение принимает клиент И ТОЛЬКО по снаряду. По отсутствию шага его принимать
+    нельзя: поле, которого в ответе нет вовсе (старый сервер под новым клиентом),
+    выглядело бы так же, и жим гантелей молча писался бы с нулевым весом.
+    """
+    built = await _day_with_preset(client, "Подтягивания", "Свой вес")
+    assert built["exercise"]["equipment"] == "bodyweight"
+    assert built["exercise"]["step"] == 2.5
+
+    state = (await client.post("/api/training/start", json={
+        "training_day_id": built["day"]["id"],
+    })).json()
+    assert state["current"]["exercise"]["equipment"] == "bodyweight"
+    assert state["current"]["exercise"]["step"] == 2.5
+
+    # Подход с поясом записывается как обычный, и вес идёт в объём.
+    state = (await client.post("/api/training/set", json={
+        "session_id": state["session_id"],
+        "exercise_id": built["exercise"]["id"],
+        "weight": 10.0,
+        "reps": 8,
+    })).json()
+    assert state["sets"][0]["weight"] == 10.0
+
+    # И без пояса — тоже: нулевой вес это факт «просто подтянулся», а не пробел.
+    state = (await client.post("/api/training/set", json={
+        "session_id": state["session_id"],
+        "exercise_id": built["exercise"]["id"],
+        "weight": 0.0,
+        "reps": 6,
+    })).json()
+    assert [s["weight"] for s in state["sets"]] == [10.0, 0.0]
+
+
+@pytest.mark.anyio
+async def test_the_step_can_be_pinned_to_the_gym(client: httpx.AsyncClient):
+    """
+    Шаг переопределяется на упражнении: снаряд задаёт начало, а не приговор.
+
+    У блока это вес одного блока (у разных станков 4.5, 5, 5.5, 7), у остальных —
+    шаг кнопок. Угадать за пользователя нельзя: любое число верно для одного зала
+    и мимо для соседнего.
+    """
+    built = await _day_with_preset(client, "Тяга верхнего блока", "Мой зал")
+    assert built["exercise"]["step"] == 5.0
+
+    await client.patch(f"/api/exercises/{built['exercise']['id']}", json={"weight_step": 4.5})
+    assert (await client.get(f"/api/day/{built['day']['id']}")).json()["exercises"][-1]["step"] == 4.5
+
+    # Экран подхода читает тот же шаг — иначе настройка не доехала бы туда,
+    # ради чего её и правили.
+    state = (await client.post("/api/training/start", json={
+        "training_day_id": built["day"]["id"],
+    })).json()
+    assert state["current"]["exercise"]["step"] == 4.5
+
+    # Ноль — способ сказать «как у снаряда»: PATCH не умеет присылать NULL,
+    # а отменить переопределение чем-то надо.
+    await client.patch(f"/api/exercises/{built['exercise']['id']}", json={"weight_step": 0})
+    assert (await client.get(f"/api/day/{built['day']['id']}")).json()["exercises"][-1]["step"] == 5.0
+
+
+@pytest.mark.anyio
+async def test_an_own_exercise_carries_the_equipment_it_was_created_with(client: httpx.AsyncClient):
+    """
+    Своё упражнение — единственное место, где снаряд спрашивают у пользователя.
+
+    И правка снаряда догоняет уже разложенные по дням копии: название человек
+    правит для себя, а снаряд читает интерфейс, и правят его ровно затем, чтобы
+    кнопки веса начали ходить как надо.
+    """
+    catalog = (await client.get("/api/catalog")).json()
+    assert {e["id"] for e in catalog["equipment"]} >= {"barbell", "dumbbell", "stack", "bodyweight"}
+
+    back = next(c for c in catalog["categories"] if c["name"] == "Спина")
+    created = (await client.post("/api/user-exercises", json={
+        "name": "Тяга в хаммере", "description": "", "category_id": back["id"],
+        "equipment": "machine",
+    })).json()["exercise"]
+    assert created["equipment"] == "machine"
+
+    program = (await client.post("/api/programs", json={"name": "Своё"})).json()["program"]
+    day = (await client.get(f"/api/programs/{program['id']}/days")).json()["days"][0]
+    added = (await client.post(f"/api/days/{day['id']}/exercises", json={
+        "user_exercise_id": created["id"], "circle_training": False,
+    })).json()["exercises"][-1]
+    assert added["step"] == 2.5
+
+    await client.patch(f"/api/user-exercises/{created['id']}", json={
+        "name": "Тяга в хаммере", "description": "", "category_id": back["id"],
+        "equipment": "dumbbell",
+    })
+
+    fixed = (await client.get(f"/api/day/{day['id']}")).json()["exercises"][-1]
+    assert fixed["equipment"] == "dumbbell"
+    assert fixed["step"] == 2.0
+
+
+@pytest.mark.anyio
+async def test_an_unknown_equipment_is_refused(client: httpx.AsyncClient):
+    """Снаряд решает, есть ли поле веса вообще, — выдумке тут взяться неоткуда."""
+    back = next(
+        c for c in (await client.get("/api/catalog")).json()["categories"] if c["name"] == "Спина"
+    )
+    resp = await client.post("/api/user-exercises", json={
+        "name": "Ерунда", "description": "", "category_id": back["id"], "equipment": "кувалда",
+    })
+    assert resp.status_code == 422
+
+
+@pytest.mark.anyio
+async def test_the_equipment_lands_on_an_already_filled_base(client: httpx.AsyncClient):
+    """
+    Снаряд доезжает до баз, заведённых ДО него, — то есть до прода.
+
+    Миграция может дать существующим строкам только 'other' (шаг 2.5, ровно старое
+    поведение): каталог наполняется кодом, и id одного пресета на прод- и тест-контуре
+    разные. Догоняет их seed_catalog по названию — тот же путь, что и у переименования
+    категории. Проверяем именно его: сбрасываем снаряд и прогоняем сев заново.
+
+    Второй фронт — упражнения, уже разложенные по дням: они держат СНИМОК снаряда,
+    и у старых строк там NULL.
+    """
+    from sqlalchemy import select, update
+
+    from database.models import AdminExercises, Exercise
+
+    built = await _day_with_preset(client, "Тяга верхнего блока", "Старая база")
+    assert built["exercise"]["step"] == 5.0
+
+    async with session_maker() as db:
+        await db.execute(update(AdminExercises).values(equipment="other"))
+        await db.execute(update(Exercise).values(equipment=None))
+        await db.commit()
+
+    stale = (await client.get(f"/api/day/{built['day']['id']}")).json()["exercises"][-1]
+    assert stale["step"] == 2.5      # неизвестный снаряд ведёт себя как раньше, а не падает
+
+    async with session_maker() as db:
+        await seed_catalog(db)
+
+    fixed = (await client.get(f"/api/day/{built['day']['id']}")).json()["exercises"][-1]
+    assert fixed["equipment"] == "stack"
+    assert fixed["step"] == 5.0
+
+    async with session_maker() as db:
+        presets = (await db.execute(select(AdminExercises))).scalars().all()
+    assert {p.equipment for p in presets} >= {"barbell", "dumbbell", "stack", "bodyweight"}
+    # Сев идемпотентен: повторный проход не находит работы и ничего не портит.
+    async with session_maker() as db:
+        await seed_catalog(db)
+    assert (await client.get(f"/api/day/{built['day']['id']}")).json()["exercises"][-1]["step"] == 5.0
+
+
+@pytest.mark.anyio
+async def test_the_stack_is_counted_in_blocks_but_stored_in_kilograms(client: httpx.AsyncClient):
+    """
+    Блок считается блоками, а хранится килограммами.
+
+    У станка человек не набирает вес — он втыкает пин в блок и знает его номер.
+    У разных станков блоки разные, поэтому шаг в килограммах здесь неправильная единица
+    в принципе. Но объём, рекорды и графики живут в килограммах и общие для всех
+    снарядов, поэтому перевод делает клиент по весу блока, а сервер продолжает
+    получать килограммы — ничего в слое данных про блоки не знает.
+
+    Сервер обязан отдать ровно два числа, из которых перевод складывается: снаряд
+    и вес блока. Здесь проверяется, что они доезжают до ВСЕХ трёх экранов, где
+    подход показывают, — иначе один и тот же подход выглядел бы по-разному.
+    """
+    built = await _day_with_preset(client, "Тяга горизонтального блока", "Блок")
+    assert built["exercise"]["equipment"] == "stack"
+    assert built["exercise"]["step"] == 5.0
+
+    state = (await client.post("/api/training/start", json={
+        "training_day_id": built["day"]["id"],
+    })).json()
+    assert state["current"]["exercise"]["equipment"] == "stack"
+    assert state["current"]["exercise"]["step"] == 5.0
+
+    # Семь блоков при блоке 5 кг — это 35 кг, и в базу уходят именно они.
+    state = (await client.post("/api/training/set", json={
+        "session_id": state["session_id"],
+        "exercise_id": built["exercise"]["id"],
+        "weight": 35.0,
+        "reps": 12,
+    })).json()
+    assert state["sets"][0]["weight"] == 35.0
+
+    await client.post("/api/training/finish", json={"session_id": state["session_id"]})
+
+    # История — третий экран, и он тоже должен знать, чем делить.
+    session_id = (await client.get("/api/history")).json()["sessions"][0]["id"]
+    detail = (await client.get(f"/api/history/{session_id}")).json()["exercises"][0]
+    assert detail["equipment"] == "stack"
+    assert detail["step"] == 5.0
+    assert detail["sets"][0]["weight"] == 35.0
+
+    # Поправили вес блока — те же 35 кг читаются как другое число блоков.
+    # Килограммы при этом не переписываются: что подняли, то и подняли.
+    await client.patch(f"/api/exercises/{built['exercise']['id']}", json={"weight_step": 7})
+    detail = (await client.get(f"/api/history/{session_id}")).json()["exercises"][0]
+    assert detail["step"] == 7.0
+    assert detail["sets"][0]["weight"] == 35.0
+
+
+@pytest.mark.anyio
+async def test_the_weight_hint_needs_two_clean_sessions(client: httpx.AsyncClient):
+    """
+    Подсказка по весу доезжает до экрана подхода — и подчиняется правилу 2-for-2.
+
+    Смысл сквозного теста не в арифметике (её проверяет test_progression.py),
+    а в стыке: подсказке нужны ДВЕ прошлые тренировки, а слой данных умел отдавать
+    только одну. Без позапрошлого раза правило выродилось бы в «закрыл план —
+    повышай», то есть в рост веса после каждого удачно выспавшегося дня.
+    """
+    built = await _day_with_preset(client, "Жим штанги лёжа", "Прогрессия")
+    exercise_id = built["exercise"]["id"]
+    await client.patch(f"/api/exercises/{exercise_id}", json={"sets": 2, "reps": 10})
+
+    async def train(weight: float, reps: int) -> dict:
+        state = (await client.post("/api/training/start", json={
+            "training_day_id": built["day"]["id"],
+        })).json()
+        for _ in range(2):
+            state = (await client.post("/api/training/set", json={
+                "session_id": state["session_id"],
+                "exercise_id": exercise_id,
+                "weight": weight,
+                "reps": reps,
+            })).json()
+        await client.post("/api/training/finish", json={"session_id": state["session_id"]})
+        return state
+
+    # Тренировок ещё не было — предлагать не из чего.
+    state = (await client.post("/api/training/start", json={
+        "training_day_id": built["day"]["id"],
+    })).json()
+    assert state["current"]["exercise"]["suggest"] is None
+    await client.post("/api/training/finish", json={"session_id": state["session_id"]})
+
+    # Первый закрытый план — держим: по 2-for-2 это ещё не подтверждение.
+    await train(60.0, 10)
+    state = (await client.post("/api/training/start", json={
+        "training_day_id": built["day"]["id"],
+    })).json()
+    assert state["current"]["exercise"]["suggest"] == {"action": "hold", "weight": 60.0}
+    await client.post("/api/training/finish", json={"session_id": state["session_id"]})
+
+    # Второй подряд — повышаем на шаг штанги.
+    await train(60.0, 10)
+    state = (await client.post("/api/training/start", json={
+        "training_day_id": built["day"]["id"],
+    })).json()
+    assert state["current"]["exercise"]["suggest"] == {"action": "up", "weight": 62.5}

@@ -35,6 +35,10 @@ class AdminExercises(Base):
     category_id: Mapped[int] = mapped_column(ForeignKey('exercise_category.id'))
     name: Mapped[str] = mapped_column(String(), unique=True)
     description: Mapped[str] = mapped_column(Text)
+    # Штанга / гантели / блок / тренажёр / свой вес — от него шаг веса в интерфейсе
+    # (services/equipment.py). Проставляем сами в seed.py: по названию пресета снаряд
+    # очевиден, а спрашивать про него пользователя не за что.
+    equipment: Mapped[str] = mapped_column(String(16), nullable=False, server_default='other')
 
     exercise_category: Mapped['ExerciseCategory'] = relationship(backref='admin_exercises', lazy='select')
 
@@ -58,6 +62,9 @@ class UserExercises(Base):
     name: Mapped[str] = mapped_column(String())
     description: Mapped[str] = mapped_column(Text)
     circle_training: Mapped[bool] = mapped_column(Boolean(), default=False)
+    # Снаряд — единственное, что спрашиваем дополнительно при создании своего
+    # упражнения. По умолчанию 'other': не знаем — не выдумываем, шаг будет 2.5.
+    equipment: Mapped[str] = mapped_column(String(16), nullable=False, server_default='other')
 
     exercise_category: Mapped['ExerciseCategory'] = relationship(backref='user_exercises', lazy='select')
     user: Mapped['User'] = relationship(backref='user_exercises', lazy='select')
@@ -181,6 +188,21 @@ class Exercise(Base):
     training_day_id: Mapped[int] = mapped_column(ForeignKey("training_day.id", ondelete='CASCADE'), nullable=False)
     position: Mapped[int] = mapped_column(Integer, nullable=False)
     circle_training: Mapped[bool] = mapped_column(Boolean(), default=False)
+
+    # Снимок снаряда с карточки каталога — ровно как name и description выше.
+    # Читать его через admin_exercise/user_exercise было бы честнее, но связи
+    # ленивые: обращение к ним вне загруженной сессии роняет асинхронный запрос,
+    # а упражнения дня отдаются из полудюжины мест.
+    #
+    # NULL значит «снимок не снят»: так выглядят строки, разложенные по дням до
+    # появления колонки. Их досыпает seed_catalog при старте, а до того они
+    # ведут себя как OTHER.
+    equipment: Mapped[str] = mapped_column(String(16), nullable=True)
+
+    # Поправка на конкретный зал: шаг кнопок веса, а у блока — вес одного блока
+    # (бывает 4.5, 5, 5.5, 7). NULL — «как у снаряда»; ноль означает то же самое,
+    # потому что PATCH не умеет присылать NULL.
+    weight_step: Mapped[float] = mapped_column(Float(), nullable=True)
 
     admin_exercise_id: Mapped[int] = mapped_column(ForeignKey('admin_exercises.id', ondelete='CASCADE'), nullable=True)
     user_exercise_id: Mapped[int] = mapped_column(ForeignKey('user_exercises.id', ondelete='CASCADE'), nullable=True)

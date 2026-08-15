@@ -6,6 +6,7 @@
 """
 from database.models import Exercise, RestTimer, TrainingDay, TrainingProgram
 from services.clock import utcnow
+from services.equipment import OTHER, weight_step
 
 
 def day_json(day: TrainingDay) -> dict:
@@ -21,6 +22,11 @@ def exercise_json(exercise: Exercise) -> dict:
         "reps": exercise.base_reps,
         "circle": exercise.circle_training,
         "position": exercise.position,
+        "equipment": exercise.equipment or OTHER,
+        # Шаг кнопок «−/+» под весом — всегда число. Показывать ли поле веса,
+        # клиент решает по снаряду: у своего веса поле необязательно, но не
+        # запрещено (подтягивания с поясом), и шаг там нужен такой же.
+        "step": weight_step(exercise.equipment, exercise.weight_step),
     }
 
 

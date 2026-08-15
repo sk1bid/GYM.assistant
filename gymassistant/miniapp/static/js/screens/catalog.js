@@ -291,7 +291,7 @@ export async function exerciseScreen({ dayId, id }) {
  * было только вернувшись в каталог и найдя себя среди пресетов.
  */
 export async function myExercisesScreen({ dayId } = {}) {
-  const [{ exercises }, { categories }] = await Promise.all([
+  const [{ exercises }, { categories, equipment }] = await Promise.all([
     api.userExercises.list(),
     api.catalog.categories(),
   ]);
@@ -323,10 +323,10 @@ export async function myExercisesScreen({ dayId } = {}) {
     <button class="btn secondary mt-4" id="create">Создать упражнение</button>
   `);
 
-  on('#create', 'click', () => editUserExercise(null, categories, dayId));
+  on('#create', 'click', () => editUserExercise(null, categories, dayId, equipment));
   onAll('[data-edit]', 'click', (node) => {
     const exercise = exercises.find((e) => e.id === Number(node.dataset.edit));
-    editUserExercise(exercise, categories, dayId);
+    editUserExercise(exercise, categories, dayId, equipment);
   });
 
   onAction('[data-add]', async (node) => {
@@ -334,7 +334,7 @@ export async function myExercisesScreen({ dayId } = {}) {
   });
 }
 
-function editUserExercise(exercise, categories, dayId) {
+function editUserExercise(exercise, categories, dayId, equipment = []) {
   const form = sheet(`
     <h2>${exercise ? 'Изменить' : 'Новое упражнение'}</h2>
 
@@ -349,6 +349,19 @@ function editUserExercise(exercise, categories, dayId) {
         ${categories.map((c) => `
           <option value="${c.id}" ${exercise?.category_id === c.id ? 'selected' : ''}>
             ${escape(c.name)}
+          </option>
+        `).join('')}
+      </select>
+    </div>
+
+    <!-- От снаряда зависит шаг кнопок веса на тренировке: гантели ходят по 2,
+         блок по 5, у своего веса поля веса нет вовсе. -->
+    <div class="field">
+      <label>Снаряд</label>
+      <select id="equipment">
+        ${equipment.map((e) => `
+          <option value="${e.id}" ${(exercise?.equipment || 'other') === e.id ? 'selected' : ''}>
+            ${escape(e.title)}
           </option>
         `).join('')}
       </select>
@@ -370,6 +383,7 @@ function editUserExercise(exercise, categories, dayId) {
       name: form.node.querySelector('#name').value.trim(),
       description: form.node.querySelector('#description').value.trim(),
       category_id: Number(form.node.querySelector('#category').value),
+      equipment: form.node.querySelector('#equipment').value || 'other',
     };
 
     if (!payload.name) return;

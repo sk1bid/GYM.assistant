@@ -229,6 +229,30 @@ function stat(value, label) {
   `;
 }
 
+/**
+ * Подход в истории — в той же единице, в какой его записывали.
+ *
+ * Ноль повторений бывает только у пропущенного: схема меньше единицы не пускает.
+ * Ноль веса — свой вес без пояса, и «0 кг × 12» читалось бы поломкой, а не фактом.
+ * Блок хранится в килограммах, как всё остальное, но считался блоками — показать
+ * его килограммами значило бы показать число, которого человек у станка не видел.
+ */
+function setLine(set, exercise) {
+  if (!set.reps) return 'пропущен';
+
+  if (exercise.equipment === 'stack' && exercise.step > 0) {
+    const count = Math.max(0, Math.round(set.weight / exercise.step));
+    return `${plural(count, 'блок', 'блока', 'блоков')} × ${set.reps}`;
+  }
+
+  return set.weight ? `${weight(set.weight)} кг × ${set.reps}` : plural(set.reps, 'раз', 'раза', 'раз');
+}
+
+/** Объём в подписи — только когда он есть: день из турника и пресса даёт ноль. */
+function volumeSuffix(kg) {
+  return kg > 0 ? ` · ${volume(kg)}` : '';
+}
+
 export async function historyScreen() {
   const { sessions } = await api.history();
 
@@ -243,8 +267,7 @@ export async function historyScreen() {
           <span class="title">${escape(formatDate(session.date))}</span><br>
           <span class="sub">
             ${plural(session.exercises, 'упражнение', 'упражнения', 'упражнений')} ·
-            ${plural(session.sets, 'подход', 'подхода', 'подходов')} ·
-            ${volume(session.volume)}
+            ${plural(session.sets, 'подход', 'подхода', 'подходов')}${volumeSuffix(session.volume)}
           </span>
         </span>
         <span class="chev">›</span>
@@ -261,7 +284,7 @@ export async function sessionScreen({ id }) {
   render(`
     <h1>${escape(formatDate(data.session.date))}</h1>
     <p class="subtitle">
-      ${plural(data.session.sets, 'подход', 'подхода', 'подходов')} · ${volume(data.session.volume)}
+      ${plural(data.session.sets, 'подход', 'подхода', 'подходов')}${volumeSuffix(data.session.volume)}
     </p>
 
     ${data.exercises.map((exercise) => `
@@ -269,7 +292,7 @@ export async function sessionScreen({ id }) {
       ${exercise.sets.map((set, i) => `
         <div class="set-chip">
           <span class="n">Подход ${i + 1}</span>
-          <span class="v">${weight(set.weight)} кг × ${set.reps}</span>
+          <span class="v">${setLine(set, exercise)}</span>
         </div>
       `).join('')}
     `).join('')}

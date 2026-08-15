@@ -19,6 +19,7 @@ from database.orm_extra import (
 )
 from database.orm_query import orm_get_exercises, orm_get_program, orm_get_training_day
 from miniapp.serializers import day_json, exercise_json, rest_json
+from services.progression import suggest
 from services.workout import build_plan, current_step
 
 DEFAULT_CIRCULAR_ROUNDS = 3
@@ -39,10 +40,29 @@ async def exercise_card(
     previous = await orm_get_prev_sets_by_identity(session, user_id, exercise, current_session_id)
     record = await orm_get_max_weight_by_identity(session, user_id, exercise)
 
+    card = exercise_json(exercise)
+
+    # Позапрошлый раз нужен только подсказке и только когда прошлый вообще был:
+    # правило 2-for-2 повышает вес, лишь если план закрыт две тренировки подряд.
+    before = (
+        await orm_get_prev_sets_by_identity(session, user_id, exercise, current_session_id, back=2)
+        if previous else []
+    )
+    hint = suggest(
+        exercise.base_sets or 1,
+        exercise.base_reps or 1,
+        card["step"],
+        previous,
+        before,
+    )
+
     return {
-        **exercise_json(exercise),
+        **card,
         "record": record,
         "prev": [{"weight": s.weight, "reps": s.repetitions} for s in previous],
+        # Что подставить в поле веса. null — предлагать нечего (упражнение новое
+        # или все прошлые подходы без веса).
+        "suggest": {"action": hint.action, "weight": hint.weight} if hint else None,
     }
 
 

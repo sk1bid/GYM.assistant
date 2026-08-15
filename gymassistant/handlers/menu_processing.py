@@ -781,6 +781,7 @@ async def show_exercises_in_category(session: AsyncSession, level: int, exercise
                         "name": exercise.name,
                         "description": exercise.description,
                         "circle_training": circle_training,
+                        "equipment": exercise.equipment,
                     }
 
                     if exercise_type == 'admin':
