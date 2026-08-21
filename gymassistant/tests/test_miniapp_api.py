@@ -1685,6 +1685,184 @@ async def test_the_equipment_lands_on_an_already_filled_base(client: httpx.Async
 
 
 @pytest.mark.anyio
+async def test_the_duplicate_presets_collapse_without_losing_history(client: httpx.AsyncClient):
+    """
+    Двойники схлопываются, а записанные подходы остаются на месте.
+
+    На проде «Молотки гантелями» приехали из бота, «Молотки» — из нового каталога,
+    и год они прожили в списке рядом. Слить их удалением старой карточки нельзя:
+    у exercise.admin_exercise_id стоит ON DELETE CASCADE, у exercise → set тоже,
+    поэтому удаление унесло бы подходы вместе с карточкой. Сначала перецепка,
+    потом удаление — этот порядок тест и стережёт.
+    """
+    from sqlalchemy import select
+
+    from database.models import AdminExercises, Exercise, Set
+
+    # Возвращаем базу в состояние прода: старая карточка рядом с канонической.
+    async with session_maker() as db:
+        canonical = (await db.execute(
+            select(AdminExercises).where(AdminExercises.name == "Молотки")
+        )).scalar_one()
+        db.add(AdminExercises(
+            name="Молотки гантелями",
+            description="Приехало из бота",
+            category_id=canonical.category_id,
+            equipment="other",
+        ))
+        await db.commit()
+        canonical_id = canonical.id
+
+    built = await _day_with_preset(client, "Молотки гантелями", "Старая база")
+    state = (await client.post("/api/training/start", json={
+        "training_day_id": built["day"]["id"],
+    })).json()
+    await client.post("/api/training/set", json={
+        "session_id": state["session_id"],
+        "exercise_id": built["exercise"]["id"],
+        "weight": 22.5,
+        "reps": 8,
+    })
+
+    async with session_maker() as db:
+        await seed_catalog(db)
+
+    names = {e["name"] for e in (await client.get("/api/catalog")).json()["exercises"]}
+    assert "Молотки" in names
+    assert "Молотки гантелями" not in names
+
+    async with session_maker() as db:
+        exercise = (await db.execute(
+            select(Exercise).where(Exercise.id == built["exercise"]["id"])
+        )).scalar_one()
+        sets = (await db.execute(
+            select(Set).where(Set.exercise_id == built["exercise"]["id"])
+        )).scalars().all()
+
+    # Упражнение дня уцелело и смотрит на каноническую карточку.
+    assert exercise.admin_exercise_id == canonical_id
+    # Название в дне — снимок, оно и должно остаться прежним.
+    assert exercise.name == "Молотки гантелями"
+    assert [(s.weight, s.repetitions) for s in sets] == [(22.5, 8)]
+
+
+@pytest.mark.anyio
+async def test_the_preset_renamed_by_a_single_letter_keeps_its_card(client: httpx.AsyncClient):
+    """
+    «Жим штанги лежа» → «лёжа»: карточка та же, а не вторая рядом.
+
+    Именно на этой букве каталог и разъехался. Сверка снаряда идёт ПО ИМЕНИ,
+    поэтому строка без «ё» никогда не совпадала с CATALOG — снаряд ей не
+    проставлялся, а досыпка заводила рядом второй жим. Когда канонической
+    карточки ещё нет, слияние обязано переименовать старую, а не создавать новую.
+    """
+    from sqlalchemy import select, update
+
+    from database.models import AdminExercises
+
+    async with session_maker() as db:
+        await db.execute(
+            update(AdminExercises)
+            .where(AdminExercises.name == "Жим штанги лёжа")
+            .values(name="Жим штанги лежа", equipment="other")
+        )
+        await db.commit()
+        before = (await db.execute(
+            select(AdminExercises.id).where(AdminExercises.name == "Жим штанги лежа")
+        )).scalar_one()
+
+    async with session_maker() as db:
+        await seed_catalog(db)
+
+    async with session_maker() as db:
+        rows = (await db.execute(
+            select(AdminExercises).where(AdminExercises.name.in_(
+                ("Жим штанги лежа", "Жим штанги лёжа")
+            ))
+        )).scalars().all()
+
+    assert len(rows) == 1, "второй жим рядом со старым — это и был баг"
+    assert rows[0].id == before, "карточка та же самая, а не заведённая заново"
+    assert rows[0].name == "Жим штанги лёжа"
+    assert rows[0].equipment == "barbell", "после переименования снаряд наконец совпал"
+
+
+@pytest.mark.anyio
+async def test_the_renamed_category_unblocks_the_presets_behind_it(client: httpx.AsyncClient):
+    """
+    Пока категория называлась «Грудные», в неё не заезжал НИ ОДИН пресет груди.
+
+    Досыпка ищет категорию по имени и незнакомое молча пропускает
+    (`category not in categories`). Из-за этого прод год выглядел наполненным,
+    а половины груди в каталоге просто не было — и заметить это по логам нельзя,
+    пропуск ничего не пишет.
+    """
+    from sqlalchemy import delete, select, update
+
+    from database.models import AdminExercises, ExerciseCategory
+
+    async with session_maker() as db:
+        chest = (await db.execute(
+            select(ExerciseCategory).where(ExerciseCategory.name == "Грудь")
+        )).scalar_one()
+        await db.execute(delete(AdminExercises).where(AdminExercises.category_id == chest.id))
+        await db.execute(
+            update(ExerciseCategory).where(ExerciseCategory.id == chest.id).values(name="Грудные")
+        )
+        await db.commit()
+
+    async with session_maker() as db:
+        await seed_catalog(db)
+
+    catalog = (await client.get("/api/catalog")).json()
+    groups = {c["name"]: c["id"] for c in catalog["categories"]}
+    assert "Грудь" in groups and "Грудные" not in groups
+
+    chest_names = {
+        e["name"] for e in catalog["exercises"] if e["category_id"] == groups["Грудь"]
+    }
+    assert "Жим штанги лёжа" in chest_names
+    assert "Брусья" in chest_names
+
+
+@pytest.mark.anyio
+async def test_the_preset_filed_under_the_wrong_group_moves_home(client: httpx.AsyncClient):
+    """
+    «Жим гантелей лёжа» лежал в «Прессе», «Становая тяга» — в «Ногах».
+
+    Категория карточки — такой же факт из CATALOG, как снаряд, и руками её тоже
+    негде выставить. Пока она врёт, упражнение не находится там, где его ищут.
+    """
+    from sqlalchemy import select, update
+
+    from database.models import AdminExercises, ExerciseCategory
+
+    async with session_maker() as db:
+        abs_id = (await db.execute(
+            select(ExerciseCategory.id).where(ExerciseCategory.name == "Пресс")
+        )).scalar_one()
+        await db.execute(
+            update(AdminExercises)
+            .where(AdminExercises.name == "Жим гантелей лёжа")
+            .values(category_id=abs_id)
+        )
+        await db.commit()
+
+    before = (await client.get("/api/catalog")).json()
+    groups = {c["name"]: c["id"] for c in before["categories"]}
+    press = next(e for e in before["exercises"] if e["name"] == "Жим гантелей лёжа")
+    assert press["category_id"] == groups["Пресс"]
+
+    async with session_maker() as db:
+        await seed_catalog(db)
+
+    after = (await client.get("/api/catalog")).json()
+    groups = {c["name"]: c["id"] for c in after["categories"]}
+    chest = next(e for e in after["exercises"] if e["name"] == "Жим гантелей лёжа")
+    assert chest["category_id"] == groups["Грудь"]
+
+
+@pytest.mark.anyio
 async def test_the_stack_is_counted_in_blocks_but_stored_in_kilograms(client: httpx.AsyncClient):
     """
     Блок считается блоками, а хранится килограммами.
