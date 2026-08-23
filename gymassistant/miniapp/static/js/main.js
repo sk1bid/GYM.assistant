@@ -18,6 +18,7 @@ import { dayScreen, scheduleScreen } from './screens/schedule.js';
 import { catalogScreen, categoryScreen, exerciseScreen, myExercisesScreen } from './screens/catalog.js';
 import { programScreen, programsScreen } from './screens/programs.js';
 import { historyScreen, profileScreen, progressScreen, recordsScreen, sessionScreen } from './screens/profile.js';
+import { notificationsScreen } from './screens/settings.js';
 
 ready();
 
@@ -46,6 +47,7 @@ route('/profile', profileScreen);
 route('/history', historyScreen);
 route('/history/:id', sessionScreen);
 route('/records', recordsScreen);
+route('/notifications', notificationsScreen);
 route('/progress/:id', progressScreen);
 
 // Возврат к тому, на чём остановился пользователь. Тренировка и отдых живут на

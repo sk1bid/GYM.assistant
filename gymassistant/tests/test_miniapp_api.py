@@ -14,6 +14,7 @@ import os
 import sys
 import tempfile
 import urllib.parse
+import uuid
 from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -1962,3 +1963,115 @@ async def test_the_weight_hint_needs_two_clean_sessions(client: httpx.AsyncClien
         "training_day_id": built["day"]["id"],
     })).json()
     assert state["current"]["exercise"]["suggest"] == {"action": "up", "weight": 62.5}
+
+
+# ---------------------------------------------------------------- уведомления
+
+
+@pytest.mark.anyio
+async def test_notification_settings_default_and_save(client: httpx.AsyncClient):
+    """
+    Настройки читаются до того, как их хоть раз сохранили.
+
+    Строка в БД заводится лениво, и GET обязан отдавать те же значения, по которым
+    работает воркер: 10:00 и напоминание за три часа. Разойдись эти два места —
+    и «я ничего не менял» означало бы разное поведение до и после первого захода
+    в настройки.
+    """
+    data = (await client.get("/api/notifications")).json()
+    assert data["settings"]["train_at"] == "10:00"
+    assert data["settings"]["lead_minutes"] == 180
+    # Производное поле: во сколько придёт напоминание. Считает сервер — вычитание
+    # минут выглядит безобидно ровно до тех пор, пока не упрётся в полночь.
+    assert data["settings"]["remind_at"] == "07:00"
+    assert data["settings"]["enabled"] is True
+
+    saved = (await client.patch("/api/notifications", json={
+        "train_at": "18:30",
+        "lead_minutes": 60,
+        "weekly": False,
+    })).json()
+
+    assert saved["settings"]["train_at"] == "18:30"
+    assert saved["settings"]["remind_at"] == "17:30"
+    assert saved["settings"]["weekly"] is False
+    # Нетронутое осталось на месте.
+    assert saved["settings"]["missed"] is True
+
+    assert (await client.get("/api/notifications")).json()["settings"] == saved["settings"]
+
+
+@pytest.mark.anyio
+async def test_notification_settings_reject_junk_time(client: httpx.AsyncClient):
+    """
+    «25:70» обязано дать 422, а не лечь в колонку, по которой раз в минуту
+    считается окно напоминания.
+    """
+    for junk in ("25:00", "10:70", "10", "вечером", ""):
+        response = await client.patch("/api/notifications", json={"train_at": junk})
+        assert response.status_code == 422, junk
+
+
+@pytest.mark.anyio
+async def test_timezone_is_remembered_for_the_worker(client: httpx.AsyncClient):
+    """
+    Пояс оседает в базе на любом запросе Mini App.
+
+    Ради воркера напоминаний: он просыпается сам, без запроса клиента, и «сегодня
+    вторник» с «через три часа» посчитать ему больше не по чему. Мусор при этом
+    в базу не попадает — иначе воркер не отличил бы его от «телефон ещё не
+    сообщал зону».
+    """
+    from database.orm_query import orm_get_user_by_id
+
+    await client.get("/api/bootstrap", headers={"X-Timezone": "Europe/Lisbon"})
+    async with session_maker() as session:
+        assert (await orm_get_user_by_id(session, USER_ID)).timezone == "Europe/Lisbon"
+
+    # Переезд лечится первым же открытием приложения.
+    await client.get("/api/bootstrap", headers={"X-Timezone": "Asia/Novosibirsk"})
+    async with session_maker() as session:
+        assert (await orm_get_user_by_id(session, USER_ID)).timezone == "Asia/Novosibirsk"
+
+    await client.get("/api/bootstrap", headers={"X-Timezone": "'; DROP TABLE"})
+    async with session_maker() as session:
+        assert (await orm_get_user_by_id(session, USER_ID)).timezone == "Asia/Novosibirsk"
+
+
+@pytest.mark.anyio
+async def test_usual_start_time_is_suggested_from_history(client: httpx.AsyncClient):
+    """
+    Подсказка «по истории — около 18:30»: время по умолчанию мы не угадываем,
+    но показать человеку его же привычку можем.
+
+    Меньше трёх тренировок — молчим: подсказка, построенная на одном случае,
+    выглядит как знание, которым мы не располагаем.
+    """
+    from database.models import TrainingSession
+
+    built = await _day_with_preset(client, "Жим штанги лёжа", "Привычка")
+
+    assert (await client.get("/api/notifications")).json()["usual"] is None
+
+    # 18:30 по Новосибирску — это 11:30 UTC, а в базе время лежит naive-UTC.
+    async with session_maker() as session:
+        for day in range(4):
+            state = (await client.post("/api/training/start", json={
+                "training_day_id": built["day"]["id"],
+            })).json()
+            await client.post("/api/training/set", json={
+                "session_id": state["session_id"],
+                "exercise_id": built["exercise"]["id"],
+                "weight": 60.0,
+                "reps": 10,
+            })
+            await client.post("/api/training/finish", json={"session_id": state["session_id"]})
+
+            training = await session.get(TrainingSession, uuid.UUID(state["session_id"]))
+            training.date = datetime.combine(
+                date.today() - timedelta(days=day + 1), time(11, 30)
+            )
+            await session.commit()
+
+    data = (await client.get("/api/notifications", headers={"X-Timezone": TZ_NAME})).json()
+    assert data["usual"] == "18:30"

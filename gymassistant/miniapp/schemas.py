@@ -107,3 +107,29 @@ class UserExerciseIn(BaseModel):
 class ProfileIn(BaseModel):
     name: str = Field(min_length=1, max_length=MAX_USER_NAME)
     weight: float = Field(gt=0, le=500)
+
+
+class NotificationsIn(BaseModel):
+    """
+    Настройки напоминаний. Всё опционально: с экрана прилетает только тронутое.
+
+    Время — строкой «18:30», как его отдаёт `input type="time"`; в минуты его
+    переводит `minutes()`. Разбор здесь, а не в роутере, потому что здесь же
+    стоит и проверка: «25:70» обязана дать 422, а не тихо превратиться в мусор
+    в колонке, по которому потом раз в минуту считается окно напоминания.
+    """
+    enabled: bool | None = None
+    train_at: str | None = Field(default=None, pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
+    # До двенадцати часов. Ноль — «в самое время тренировки», тоже осмысленно.
+    lead_minutes: int | None = Field(default=None, ge=0, le=720)
+    day_reminder: bool | None = None
+    unfinished: bool | None = None
+    weekly: bool | None = None
+    missed: bool | None = None
+
+    def minutes(self) -> int | None:
+        """«18:30» → 1110. Формат уже проверен схемой, разбор безопасен."""
+        if self.train_at is None:
+            return None
+        hours, minutes = self.train_at.split(":")
+        return int(hours) * 60 + int(minutes)

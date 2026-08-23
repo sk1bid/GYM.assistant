@@ -78,6 +78,13 @@ function paintProfile(data, activity) {
         <span class="sub">${plural(data.total.sessions, 'тренировка', 'тренировки', 'тренировок')}</span></span>
       <span class="chev">›</span>
     </button>
+
+    <!-- Последней: единственная строка, которая настраивает не приложение, а бота. -->
+    <button class="list-item" data-go="/notifications">
+      <span class="grow"><span class="title">Уведомления</span><br>
+        <span class="sub">Напоминания о тренировке и серии</span></span>
+      <span class="chev">›</span>
+    </button>
   `);
 
   onAction('[data-go]', (node) => go(node.dataset.go));

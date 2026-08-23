@@ -43,11 +43,25 @@ def resolve_tz(name: str | None) -> ZoneInfo:
     return DEFAULT_TZ
 
 
+def known_tz(name: str | None) -> bool:
+    """
+    Знаем ли мы такую зону. Нужна отдельно от resolve_tz: перед записью в базу
+    важно отличить «пользователь в Новосибирске» от «клиент прислал мусор», а
+    resolve_tz эти два случая специально сводит к одному.
+    """
+    return bool(name) and name in _KNOWN
+
+
 def today_in(tz: ZoneInfo) -> date:
     """Календарная дата «сейчас» в зоне tz — это и есть «сегодня» для пользователя."""
     return datetime.now(tz).date()
 
 
 def now_in(tz: ZoneInfo) -> datetime:
-    """Aware «сейчас» в зоне tz — для локального времени напоминаний (P1)."""
+    """
+    Aware «сейчас» в зоне tz.
+
+    По нему рассуждает воркер напоминаний: и «сегодня вторник», и «до тренировки
+    три часа» — это про место человека, а не про сервер.
+    """
     return datetime.now(tz)

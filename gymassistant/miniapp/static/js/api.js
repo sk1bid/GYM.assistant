@@ -125,6 +125,11 @@ export const api = {
     remove: (id) => request('DELETE', `api/user-exercises/${id}`),
   },
 
+  notifications: {
+    get:    () => request('GET', 'api/notifications'),
+    update: (patch) => request('PATCH', 'api/notifications', patch),
+  },
+
   profile:       () => request('GET', 'api/profile'),
   updateProfile: (name, weight) => request('PATCH', 'api/profile', { name, weight }),
 

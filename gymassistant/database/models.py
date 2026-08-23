@@ -3,7 +3,7 @@ from typing import List
 
 from sqlalchemy import (
     String, Float, DateTime, func, Integer, ForeignKey, Text,
-    BigInteger, Index, CheckConstraint, Boolean, UniqueConstraint
+    BigInteger, Index, CheckConstraint, Boolean, UniqueConstraint, true
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import (
@@ -101,6 +101,13 @@ class User(Base):
     name: Mapped[str] = mapped_column(String(20), nullable=False)
     weight: Mapped[float] = mapped_column(Float(), nullable=False)
     actual_program_id: Mapped[int] = mapped_column(Integer(), nullable=True)
+
+    # IANA-имя пояса, как его сообщил телефон (заголовок X-Timezone на каждом
+    # запросе Mini App). Хранится ради ВОРКЕРА напоминаний: он просыпается сам,
+    # без запроса клиента, и «сегодня» с «девять утра» посчитать ему больше не по
+    # чему. Пустое значение — пользователь ещё ни разу не открывал приложение
+    # с версией, которая зону присылает; тогда работает DEFAULT_TZ из clock.py.
+    timezone: Mapped[str] = mapped_column(String(64), nullable=True)
 
     # Связь с TrainingSession (см. модель ниже), чтобы быстро получить все сессии пользователя
     training_sessions: Mapped[List['TrainingSession']] = relationship(
@@ -371,6 +378,87 @@ class RestTimer(Base):
     # Что будет после отдыха — показываем в тексте пинга («Дальше: Жим лёжа, подход 2»).
     next_up: Mapped[str] = mapped_column(String(150), nullable=True)
     active: Mapped[bool] = mapped_column(Boolean(), nullable=False, default=True)
+
+
+class NotificationPrefs(Base):
+    """
+    Настройки напоминаний.
+
+    Отдельной таблицей, а не колонками у `User`: `User` читается почти каждым
+    запросом Mini App, а эти семь полей нужны одному воркеру раз в минуту. Строка
+    заводится ЛЕНИВО — при первом открытии экрана настроек. Пока её нет, работают
+    значения по умолчанию из services/notifications.py, и они те же самые: колонка
+    и константа обязаны совпадать, иначе «я ничего не менял» означало бы разное
+    поведение до и после первого захода в настройки.
+
+    Тихие часы и пороги (за сколько минут молчания спросить про брошенную
+    тренировку, с какого дня паузы звать обратно) колонками НЕ вынесены: это
+    решения продукта, а не пользователя. Каждый лишний тумблер — это ещё и вопрос,
+    на который человек должен ответить до первой тренировки.
+    """
+    __tablename__ = 'notification_prefs'
+
+    user_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey('user.user_id', ondelete='CASCADE'), primary_key=True
+    )
+
+    # Общий рубильник. Его же опускает воркер, когда Telegram отвечает «бот
+    # заблокирован»: слать дальше некуда, а пытаться каждую минуту — впустую.
+    enabled: Mapped[bool] = mapped_column(Boolean(), nullable=False, server_default=true(), default=True)
+
+    # Минуты от полуночи в поясе пользователя. Не Time и не строка: напоминание
+    # считается вычитанием (`train_at_minutes - lead_minutes`), а арифметика по
+    # времени суток — это ровно то место, где заводятся ошибки на час.
+    train_at_minutes: Mapped[int] = mapped_column(Integer(), nullable=False, server_default='600', default=600)
+    lead_minutes: Mapped[int] = mapped_column(Integer(), nullable=False, server_default='180', default=180)
+
+    day_reminder: Mapped[bool] = mapped_column(Boolean(), nullable=False, server_default=true(), default=True)
+    unfinished: Mapped[bool] = mapped_column(Boolean(), nullable=False, server_default=true(), default=True)
+    weekly: Mapped[bool] = mapped_column(Boolean(), nullable=False, server_default=true(), default=True)
+    missed: Mapped[bool] = mapped_column(Boolean(), nullable=False, server_default=true(), default=True)
+
+
+class Notification(Base):
+    """
+    Что уже отправлено — и что из этого ещё висит в чате.
+
+    Две обязанности в одной строке, и обе нужны.
+
+    **Не повторяться.** `dedup` — это ключ «одного раза»: дата для ежедневного
+    напоминания, понедельник недели для итога, id тренировки для вопроса «ты ещё
+    в зале?». Уникальный индекс по (user, kind, dedup) делает повтор невозможным
+    на уровне БД, а не на уровне «воркер вроде бы помнит». Это важнее, чем
+    кажется: воркер просыпается раз в минуту, и без ключа окно напоминания
+    в три часа дало бы 180 одинаковых сообщений.
+
+    **Убирать за собой.** `message_id` — что удалить, `expires_at` — когда крайний
+    срок. Уборка идёт по двум поводам сразу: наступил срок ИЛИ отпал повод
+    (напоминание о тренировке гаснет, как только тренировка началась; вопрос
+    о брошенной — как только её завершили). Живём по тому же правилу, что и пинги
+    отдыха: в чате остаётся ровно то, что ещё что-то значит.
+
+    `message_id IS NULL` — сообщение уже убрано (или его не удалось отправить),
+    строка осталась только как отметка «это уже слали».
+    """
+    __tablename__ = 'notification'
+    __table_args__ = (
+        UniqueConstraint('user_id', 'kind', 'dedup', name='uq_notification_once'),
+        # Уборщик спрашивает «что ещё висит в чате» — по этому индексу и спрашивает.
+        Index('idx_notification_live', 'message_id'),
+    )
+
+    id: Mapped[int] = mapped_column(Integer(), primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey('user.user_id', ondelete='CASCADE'), nullable=False
+    )
+    kind: Mapped[str] = mapped_column(String(24), nullable=False)
+    dedup: Mapped[str] = mapped_column(String(48), nullable=False)
+
+    chat_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    message_id: Mapped[int] = mapped_column(Integer(), nullable=True)
+
+    sent_at: Mapped[DateTime] = mapped_column(DateTime, nullable=False)
+    expires_at: Mapped[DateTime] = mapped_column(DateTime, nullable=True)
 
 
 class Set(Base):

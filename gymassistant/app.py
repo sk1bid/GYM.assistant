@@ -20,6 +20,7 @@ from handlers.user_private import user_private_router
 from handlers.admin_private import admin_router
 from handlers.user_group import user_group_router
 from handlers.miniapp_entry import router as miniapp_router, setup_menu_button
+from workers.notifier import notifier, router as notify_router
 from workers.rest_notifier import rest_notifier, router as rest_router
 from utils.load_banners import load_banners_from_folder
 from utils import globals
@@ -51,7 +52,7 @@ dp = Dispatcher()
 # Роутеры Mini App идут первыми: /app и кнопка «Закончить отдых» не должны утонуть
 # в общих обработчиках старого меню. Кнопку отдыха новый роутер берёт только вне FSM,
 # так что тренировка, запущенная из самого бота, по-прежнему ведётся его же кодом.
-dp.include_routers(miniapp_router, rest_router, user_private_router, user_group_router, admin_router)
+dp.include_routers(miniapp_router, rest_router, notify_router, user_private_router, user_group_router, admin_router)
 
 
 async def on_startup(bot: Bot):
@@ -76,6 +77,7 @@ async def on_startup(bot: Bot):
     )
 
     await start_rest_notifier(bot)
+    await start_notifier(bot)
     with contextlib.suppress(Exception):
         await setup_menu_button(bot)
 
@@ -184,10 +186,11 @@ async def on_startup_polling(bot: Bot):
         globals.error_pic = await orm_get_banner(session, "error")
 
     await start_rest_notifier(bot)
+    await start_notifier(bot)
     with contextlib.suppress(Exception):
         await setup_menu_button(bot)
 
-    # База проверена, воркер отдыха жив — только теперь реплика считается доступной.
+    # База проверена, воркеры живы — только теперь реплика считается доступной.
     global _ready
     _ready = True
 
@@ -211,6 +214,23 @@ async def start_rest_notifier(bot: Bot):
     """
     task = asyncio.create_task(rest_notifier(bot, session_maker))
     bot.rest_notifier_task = task
+    return task
+
+
+async def start_notifier(bot: Bot):
+    """
+    Поднимает воркер напоминаний — второй и последний фоновый цикл бота.
+
+    Отдельным таском, а не веткой внутри rest_notifier: у них разные тики (5 секунд
+    против минуты) и разная цена сбоя. Отдых обязан пинговать секунда в секунду,
+    напоминания подождут до следующей минуты — складывать их в один цикл значило бы
+    гонять тяжёлые запросы недели двенадцать раз в минуту.
+
+    Ссылка на таск — по той же причине, что и у соседа: слабых ссылок asyncio
+    достаточно, чтобы сборщик мусора убил цикл на полпути.
+    """
+    task = asyncio.create_task(notifier(bot, session_maker))
+    bot.notifier_task = task
     return task
 
 if __name__ == "__main__":

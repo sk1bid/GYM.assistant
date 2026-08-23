@@ -159,6 +159,17 @@ export function errorScreen(message, retry) {
   if (retry) on('#retry', 'click', retry);
 }
 
+/**
+ * Узел в текущей панели.
+ *
+ * Именно в текущей, а не в документе: панелей две, и во время свайпа одинаковые
+ * id живут в обеих. `document.getElementById` вернул бы ту, которая раньше
+ * в разметке, — то есть иногда чужую.
+ */
+export function q(selector) {
+  return root.querySelector(selector);
+}
+
 /** Обработчик на первый совпавший элемент. */
 export function on(selector, event, handler) {
   const node = root.querySelector(selector);

@@ -33,6 +33,7 @@ export function sectionOf(path) {
   if (path.startsWith('/schedule') || path.startsWith('/day/')) return '/schedule';
   if (path.startsWith('/profile') || path.startsWith('/history')
       || path.startsWith('/records') || path.startsWith('/progress/')
+      || path.startsWith('/notifications')
       || path.startsWith('/programs') || path.startsWith('/program/')) return '/profile';
   return null;
 }
