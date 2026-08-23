@@ -675,3 +675,50 @@ async def test_worker_says_nothing_on_a_rest_day(db):
     bot = FakeSender()
     await _handle_user(bot, db, (await orm_users_to_notify(db))[0])
     assert bot.sent == []
+
+
+# ---------------------------------------------------------------- найдено на проде
+
+
+def test_a_forgotten_session_does_not_silence_everything():
+    """
+    Найдено выкаткой, а не тестом.
+
+    Тренировка от 20 августа висела на проде незакрытой 2.7 суток — так бывает
+    всегда, когда из зала ушли, не нажав «Завершить». Первая версия правила
+    считала «идёт тренировка» по наличию незакрытой строки и потому глушила ВСЁ:
+    и напоминание о дне, и тихие. То есть человек с одной забытой сессией не
+    получил бы ни одного уведомления никогда.
+    """
+    from services.notifications import UNFINISHED_MAX_IDLE
+
+    stale = Active(session_id="s", idle=UNFINISHED_MAX_IDLE + 1, sets=9)
+    assert kinds(plan(facts(active=stale))) == [DAY]
+
+    evening = facts(now=moment(MONDAY, 19), today=None, active=stale,
+                    missed=Missed(day_id=1, name="Воскресенье", days_ago=1))
+    assert kinds(plan(evening)) == [MISSED]
+
+    # А настоящая тренировка по-прежнему всё глушит: человек в зале.
+    fresh = Active(session_id="s", idle=20, sets=4)
+    assert kinds(plan(facts(active=fresh))) == []
+
+
+def test_missed_day_is_silent_for_someone_long_gone():
+    """
+    Тоже с прода: у пользователя 159 дней без зала и программа на месте.
+
+    `missed_day` в такой ситуации показывает пропущенным КАЖДЫЙ день программы,
+    и у каждого свой ключ повтора — то есть четыре сообщения в неделю тому, кто
+    полгода не заходил. Его забирает приглашение вернуться, и ровно один раз.
+    """
+    gone = facts(now=moment(MONDAY, 19), today=None, days_off=159,
+                 last_training=MONDAY - timedelta(days=159),
+                 missed=Missed(day_id=1, name="Суббота", days_ago=1))
+    assert kinds(plan(gone)) == [COMEBACK]
+
+    # У того, кто ходит, пропущенный день по-прежнему первее возвращения.
+    active_user = facts(now=moment(MONDAY, 19), today=None, days_off=2,
+                        last_training=MONDAY - timedelta(days=2),
+                        missed=Missed(day_id=1, name="Суббота", days_ago=1))
+    assert kinds(plan(active_user)) == [MISSED]

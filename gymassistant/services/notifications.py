@@ -124,7 +124,13 @@ class DayPlan:
 
 @dataclass(frozen=True)
 class Active:
-    """Идущая тренировка. `idle` — минут с последнего записанного подхода."""
+    """
+    Незакрытая тренировка. `idle` — минут с последнего записанного подхода.
+
+    «Незакрытая» и «идущая» — не одно и то же, и путать их дорого: сессия
+    остаётся с `finished_at = NULL` навсегда, если человек ушёл, не нажав
+    «Завершить». Идущей её считает `_in_gym()`.
+    """
     session_id: str
     idle: int
     sets: int
@@ -225,6 +231,19 @@ def plan(facts: Facts) -> list[Push]:
     return out
 
 
+def _in_gym(facts: Facts) -> bool:
+    """
+    Человек прямо сейчас в зале — то есть молчим про всё остальное.
+
+    Не «есть незакрытая тренировка»: она остаётся незакрытой навсегда, если из
+    зала ушли, не нажав «Завершить». На проде такая висела 2.7 суток — и по
+    первой версии правила глушила ВСЁ, включая напоминание о дне тренировки.
+    Порог тот же, по которому мы перестаём спрашивать «ты ещё в зале?»: после
+    суток тишины это уже не тренировка, а строка в базе.
+    """
+    return facts.active is not None and facts.active.idle <= UNFINISHED_MAX_IDLE
+
+
 def _quiet(now: datetime) -> bool:
     minutes = now.hour * 60 + now.minute
     return minutes >= QUIET_FROM or minutes < QUIET_TO
@@ -249,7 +268,7 @@ def _day_reminder(facts: Facts) -> Push | None:
     отправленное вчера, врёт словом «сегодня».
     """
     prefs = facts.prefs
-    if not prefs.day_reminder or not facts.today or facts.trained_today or facts.active:
+    if not prefs.day_reminder or not facts.today or facts.trained_today or _in_gym(facts):
         return None
 
     start = max(0, prefs.train_at_minutes - prefs.lead_minutes)
@@ -313,7 +332,7 @@ def _ambient(facts: Facts) -> Push | None:
     Пока идёт тренировка, молчим совсем: человек в зале, и любое из четырёх
     сообщений там неуместно.
     """
-    if facts.ambient_today or facts.active:
+    if facts.ambient_today or _in_gym(facts):
         return None
 
     for build in (_streak, _missed, _week, _comeback):
@@ -380,6 +399,11 @@ def _missed(facts: Facts) -> Push | None:
     if not facts.prefs.missed or not missed:
         return None
     if facts.now.hour < MISSED_HOUR:
+        return None
+    # Ушедшему совсем про отдельный день говорить нечего: пропущены ВСЕ, и у
+    # каждого свой ключ повтора — то есть по сообщению на каждый день программы,
+    # неделя за неделей. Такого человека забирает `_comeback`, и ровно один раз.
+    if facts.days_off is not None and facts.days_off >= COMEBACK_AFTER_DAYS:
         return None
 
     fell_on = facts.now.date() - timedelta(days=missed.days_ago)
