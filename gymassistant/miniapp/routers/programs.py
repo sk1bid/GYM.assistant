@@ -19,9 +19,10 @@ from miniapp.db import Session
 from miniapp.deps import CurrentUser
 from miniapp.ownership import own_program
 from miniapp.program_templates import BY_ID, TEMPLATES, template_json
-from miniapp.routers.schedule import week
+from miniapp.routers.schedule import planned_json
 from miniapp.schemas import ProgramIn, ProgramPatchIn
 from miniapp.serializers import program_json
+from services.progress import program_week
 
 router = APIRouter(prefix="/api/programs", tags=["programs"])
 
@@ -170,5 +171,5 @@ async def program_days(program_id: int, user: CurrentUser, session: Session):
     return {
         "ok": True,
         "program": program_json(program, user.actual_program_id),
-        "days": await week(session, program.id),
+        "days": [planned_json(d) for d in await program_week(session, program.id)],
     }

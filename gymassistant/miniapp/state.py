@@ -20,9 +20,7 @@ from database.orm_extra import (
 from database.orm_query import orm_get_exercises, orm_get_program, orm_get_training_day
 from miniapp.serializers import day_json, exercise_json, rest_json
 from services.progression import suggest
-from services.workout import build_plan, current_step
-
-DEFAULT_CIRCULAR_ROUNDS = 3
+from services.workout import DEFAULT_CIRCULAR_ROUNDS, build_plan, current_step
 
 
 async def exercise_card(

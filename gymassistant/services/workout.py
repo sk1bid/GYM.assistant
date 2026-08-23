@@ -11,6 +11,11 @@
 from dataclasses import dataclass
 from typing import List, Sequence
 
+# Сколько кругов в круговом блоке, если программа молчит. Живёт здесь, рядом
+# с build_plan, который по этому числу и разворачивает блок: спрашивают его
+# и Mini App, и воркер напоминаний, а общего у них только services/.
+DEFAULT_CIRCULAR_ROUNDS = 3
+
 
 def group_exercises_into_blocks(exercises: Sequence) -> List[List]:
     """
